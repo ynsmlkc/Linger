@@ -1,0 +1,26 @@
+{
+  "name": "@linger/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "dev": "node build.mjs && node dist/server.mjs",
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@linger/protocol": "workspace:*",
+    "@hono/node-server": "^2.1.1",
+    "hono": "^4.13.1",
+    "@linger/payments": "workspace:*",
+    "maxmind": "^5.0.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "esbuild": "^0.28.2",
+    "@solana/web3.js": "^1.98.4",
+    "tweetnacl": "^1.0.3",
+    "bs58": "^6.0.0"
+  }
+}

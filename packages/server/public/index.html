@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Linger — one sponsored line while your agent thinks</title>
+<meta name="description" content="Developers get paid in USDC for one line of text that shows in the terminal only while an AI coding assistant is working.">
+<meta name="theme-color" content="#12110f">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='28' fill='%23f97335'>✶</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/landing.css">
+</head>
+<body class="landing">
+
+<header class="top" id="top">
+  <div class="top-in">
+    <a class="brand" href="/"><span class="star">✶</span>linger</a>
+    <nav class="nav">
+      <a class="hide-sm" href="#how">How it works</a>
+      <a class="hide-sm" href="#privacy">Privacy</a>
+      <a class="hide-xs" href="/advertisers">Advertisers</a>
+      <span class="chip"><span class="dot"></span>devnet</span>
+      <a class="pill pill-solid" href="/app">Your earnings</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ── hero ── -->
+  <section class="hero">
+    <div class="hero-row">
+      <div>
+        <p class="kicker"><span class="star">✶</span><span id="eyebrow">Terminal-native ad marketplace</span></p>
+        <h1 class="display">One sponsored line while your agent thinks. <span class="soft">Paid in USDC, on Solana.</span></h1>
+      </div>
+      <div class="hero-side">
+        <p class="p">Install a small CLI. While Claude Code is working, a single line of text sits in your status line. When the answer lands, it is gone.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Urunun kendisi. Anlatmak yerine GOSTERIYORUZ: satir bekleme
+       sirasinda duruyor, cevap gelince kayboluyor. -->
+  <section class="stage">
+    <div class="stage-copy">
+      <p class="h3">Shown only while you wait. <span class="soft">Gone when the answer lands.</span></p>
+      <button class="cmd" id="copy-install" aria-label="Copy install command">
+        <span class="dollar">$</span><span class="txt">npm i -g lingersh &amp;&amp; linger init --spinner</span><span class="tag">copy</span>
+      </button>
+    </div>
+
+    <div class="scene" id="scene">
+      <pre class="ascii" id="ascii" aria-hidden="true"></pre>
+
+      <figure class="win" style="margin: 0">
+        <figcaption class="win-bar">
+          <span class="dots"><i></i><i></i><i></i></span>
+          <span class="title">~/projects/api — claude</span>
+        </figcaption>
+        <div class="win-body">
+          <div class="dim">❯ claude</div>
+          <div class="prompt-box">&gt; <span id="prompt">add rate limiting to the auth middleware</span></div>
+          <div class="act" id="act-row"><span class="bullet">●</span><span id="activity">Editing src/auth/middleware.ts</span></div>
+          <div class="act mut" style="opacity: 0.55"><span class="bullet" style="color: var(--faint)">⎿</span><span>Read 3 files · 1 search</span></div>
+        </div>
+        <div class="term-status">
+          <span class="ad" id="ad">
+            <span style="color: var(--accent)">✶</span>
+            <span class="ad-text">
+              <span class="brand-name" id="ad-brand">Your product</span><span class="sep"> — <span id="ad-text">what it does, in a few words</span> · </span><span class="cta" id="ad-cta">yourdomain.com</span>
+            </span>
+          </span>
+          <span class="ad-right" id="ad-right">Edit · 2.8s</span>
+        </div>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ── nasil calisir ── -->
+  <section class="block" id="how">
+    <div class="block-head">
+      <h2 class="h2">Three steps. <span class="soft">Then you forget it is there.</span></h2>
+      <p class="p">No account, no email, no password. A command, a wallet signature, and a line that only exists while you are waiting anyway.</p>
+    </div>
+
+    <div class="cards">
+      <article class="card-l reveal">
+        <div class="head">
+          <span class="no">01</span>
+          <h3 class="h3">Install</h3>
+          <p class="p-sm">It edits your Claude Code settings and nothing else on the machine.</p>
+        </div>
+        <div class="demo">
+          <div><span class="dim">$</span> <span class="ink">linger init --spinner</span></div>
+          <div><span class="ok">✓</span> statusLine installed</div>
+          <div><span class="ok">✓</span> spinnerVerbs installed</div>
+          <div><span class="ok">✓</span> hooks.UserPromptSubmit installed</div>
+          <div><span class="ok">✓</span> hooks.Stop installed</div>
+          <div><span class="ok">✓</span> daemon running</div>
+          <div class="dim" style="margin-top: 6px">To undo: linger uninstall</div>
+        </div>
+      </article>
+
+      <article class="card-l reveal">
+        <div class="head">
+          <span class="no">02</span>
+          <h3 class="h3">Connect your wallet</h3>
+          <p class="p-sm">Phantom, Solflare or Backpack. You sign a message — not a transaction. We never see a key.</p>
+        </div>
+        <div class="demo" style="display: grid; align-content: center">
+          <div class="sign">
+            <div class="row"><span class="ink">Sign message</span><span class="dim">no fee</span></div>
+            <div class="msg">Sign in to Linger<span class="dim">
+publisher login · expires in 5 min</span></div>
+            <div class="btns"><span>Cancel</span><span class="go">Sign</span></div>
+          </div>
+          <div class="dim" style="margin-top: 12px">$ linger login</div>
+        </div>
+      </article>
+
+      <article class="card-l reveal" id="meter-card">
+        <div class="head">
+          <span class="no">03</span>
+          <h3 class="h3">Get paid</h3>
+          <p class="p-sm">An impression counts only after ten seconds on screen. Half of what the advertiser pays is yours.</p>
+        </div>
+        <div class="demo">
+          <div><span class="acc">✶</span> <span class="ink">Your product</span> — one line</div>
+          <div class="meter"><i></i></div>
+          <div class="ticks"><span>0s</span><span>shown</span><span class="acc">10s · counted</span></div>
+          <div style="margin-top: 18px; display: grid; gap: 2px">
+            <div style="display: flex; justify-content: space-between"><span>publisher share</span><span class="ink">50%</span></div>
+            <div style="display: flex; justify-content: space-between"><span>payout asset</span><span class="ink">USDC</span></div>
+            <div style="display: flex; justify-content: space-between"><span>minimum payout</span><span class="ink">none</span></div>
+          </div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <!-- ── gizlilik ── -->
+  <section class="block" id="privacy">
+    <div class="block-head">
+      <h2 class="h2">What leaves your machine. <span class="soft">All of it.</span></h2>
+      <p class="p">This is the entire impression report, field for field. If it is not in this object, it is not sent.</p>
+    </div>
+
+    <div class="privacy">
+      <div class="code-card reveal">
+        <div class="cap"><span>impression report</span><span>POST /v1/impressions</span></div>
+<pre><span class="c">{</span>
+  <span class="k">id</span>:            <span class="s">"01J9Z…"</span>,        <span class="c">// random, per impression</span>
+  <span class="k">campaignId</span>:    <span class="s">"cmp_…"</span>,
+  <span class="k">nonce</span>:         <span class="s">"…"</span>,
+  <span class="k">sessionId</span>:     <span class="s">"…"</span>,             <span class="c">// random, not you</span>
+  <span class="k">surface</span>:       <span class="s">"statusline"</span>,
+  <span class="k">durationMs</span>:    <span class="n">12400</span>,
+  <span class="k">clientTs</span>:      <span class="n">1790000000000</span>,
+  <span class="k">projectKey</span>:    <span class="s">"9f2c…"</span>,         <span class="c">// salted HMAC, never the path</span>
+  <span class="k">clientVersion</span>: <span class="s">"0.1.13"</span>,
+  <span class="k">os</span>:            <span class="s">"darwin"</span>,
+  <span class="k">arch</span>:          <span class="s">"arm64"</span>
+<span class="c">}</span></pre>
+      </div>
+
+      <div class="never reveal">
+        <div>
+          <h3 class="h3">Never sent</h3>
+          <p class="p-sm" style="margin-top: 4px">Not hashed, not sampled, not "anonymised". Not sent.</p>
+        </div>
+        <ul>
+          <li>your directory path <span class="x">✕</span></li>
+          <li>your file names <span class="x">✕</span></li>
+          <li>your prompts <span class="x">✕</span></li>
+          <li>your code <span class="x">✕</span></li>
+        </ul>
+        <a class="link-under" href="/privacy" style="margin-top: auto; align-self: start">The full privacy detail →</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── durum ── -->
+  <section class="block">
+    <div class="block-head">
+      <h2 class="h2">Where this actually stands.</h2>
+      <p class="p">Advertisers deposit, publishers get paid on-chain, the pipeline runs end to end — with test money. No projections here, only the ledger.</p>
+    </div>
+    <div class="status reveal">
+      <div><span class="k">network</span><span class="v acc">devnet</span></div>
+      <div><span class="k">asset</span><span class="v">USDC</span></div>
+      <div><span class="k">publisher share</span><span class="v">50%</span></div>
+      <div><span class="k">counts after</span><span class="v">10s</span></div>
+    </div>
+    <p class="p-sm" style="margin-top: 14px; font-family: var(--mono); font-size: 12.5px; color: var(--faint)">The first devnet payout transaction will be linked here, so you can open it and check.</p>
+  </section>
+
+  <!-- ── siralama ── -->
+  <section class="block" id="board">
+    <div class="block-head">
+      <h2 class="h2">Who gets paid, and where.</h2>
+      <p class="p">Developers who chose to be listed. A nickname and a country — never a wallet address. Their own ads don't count.</p>
+    </div>
+
+    <div class="globe-wrap">
+      <canvas id="globe" aria-label="Globe of countries with listed developers. Drag or use the arrow keys to rotate."></canvas>
+      <div class="globe-tip mono hidden" id="globe-tip"></div>
+      <p class="globe-stats mono" id="globe-stats"></p>
+    </div>
+
+    <div class="board">
+      <div class="board-main">
+        <div class="board-bar">
+          <div class="seg" role="group" aria-label="Region">
+            <button class="seg-btn on" id="scope-global" aria-pressed="true">Global</button>
+            <select class="seg-select mono" id="scope-country" aria-label="Country"><option value="">Country…</option></select>
+          </div>
+          <div class="seg" role="group" aria-label="Period" id="period">
+            <button class="seg-btn on" data-period="all" aria-pressed="true">All</button>
+            <button class="seg-btn" data-period="30d" aria-pressed="false">30D</button>
+            <button class="seg-btn" data-period="7d" aria-pressed="false">7D</button>
+          </div>
+        </div>
+        <table class="board-table mono">
+          <thead><tr><th class="rank">#</th><th>Developer</th><th class="num col-imp">Impressions</th><th class="num">Earned</th></tr></thead>
+          <tbody id="board-rows"></tbody>
+        </table>
+        <div class="board-empty hidden" id="board-empty">
+          <p class="body" style="margin: 0 0 6px; color: var(--ink-soft)" id="board-empty-title">Nobody is listed yet.</p>
+          <p class="small" style="margin: 0">Open the <a class="link-under" href="/app">panel</a>, pick a nickname and turn on “Show me on the leaderboard”.</p>
+        </div>
+      </div>
+
+      <aside class="board-card hidden" id="board-card" aria-live="polite">
+        <div class="pc-head">
+          <span class="pc-avatar mono" id="pc-avatar"></span>
+          <div style="min-width: 0">
+            <h3 class="pc-name" id="pc-name"></h3>
+            <p class="small" style="margin: 2px 0 0" id="pc-country"></p>
+          </div>
+        </div>
+        <div class="pc-grid">
+          <div><span class="pc-k">Global</span><span class="pc-v" id="pc-global"></span></div>
+          <div><span class="pc-k">Country</span><span class="pc-v" id="pc-crank"></span></div>
+          <div><span class="pc-k">Impressions</span><span class="pc-v" id="pc-imp"></span></div>
+          <div class="wide"><span class="pc-k">Earned</span><span class="pc-v accent" id="pc-earned"></span></div>
+        </div>
+        <div class="pc-history">
+          <div class="pc-k" style="display: flex; justify-content: space-between"><span>Last 30 days</span><span id="pc-avg"></span></div>
+          <svg id="pc-spark" viewBox="0 0 300 64" preserveAspectRatio="none" aria-hidden="true"></svg>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+
+  <!-- ── daha fazlasi ── -->
+  <section class="block">
+    <h2 class="h2" style="margin-bottom: 28px">Learn more</h2>
+    <div class="links">
+      <a class="link-card" href="/app">
+        <span class="h3">Your earnings</span>
+        <span class="p-sm">Connect the wallet you logged in with and see what has been counted.</span>
+        <span class="go">Open the dashboard →</span>
+      </a>
+      <a class="link-card" href="/advertisers">
+        <span class="h3">Selling a dev tool?</span>
+        <span class="p-sm">Buy the line — 80 characters, plain text, in front of developers who are waiting.</span>
+        <span class="go">For advertisers →</span>
+      </a>
+      <a class="link-card" href="/privacy">
+        <span class="h3">Privacy, in full</span>
+        <span class="p-sm">Every field in both directions, and what the CLI does on your machine.</span>
+        <span class="go">Read the detail →</span>
+      </a>
+      <a class="link-card" href="https://github.com/ynsmlkc/Linger" target="_blank" rel="noopener">
+        <span class="h3">Read the source</span>
+        <span class="p-sm">The CLI, the server and the on-chain vault. Read it before you run it.</span>
+        <span class="go">GitHub →</span>
+      </a>
+    </div>
+  </section>
+
+  <!-- ── kapanis ── -->
+  <section class="finale">
+    <pre class="ascii-star" id="ascii-star" aria-hidden="true"></pre>
+    <h2 class="display">Try Linger</h2>
+    <button class="cmd" id="copy-install-2" aria-label="Copy install command">
+      <span class="dollar">$</span><span class="txt">npm i -g lingersh &amp;&amp; linger init --spinner</span><span class="tag">copy</span>
+    </button>
+    <div class="sub">
+      <span>Leaving takes one command:</span>
+      <a href="#" id="copy-uninstall">linger uninstall</a>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>✶ linger — devnet</span>
+    <div style="display: flex; gap: 24px">
+      <a href="/advertisers">Advertisers</a>
+      <a href="/privacy">Privacy</a>
+      <a href="https://github.com/ynsmlkc/Linger" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</footer>
+
+<script type="module">
+  import { copyButton, $ } from '/app.js';
+
+  const INSTALL = 'npm i -g lingersh && linger init --spinner';
+  copyButton($('#copy-install'), () => INSTALL);
+  copyButton($('#copy-install-2'), () => INSTALL);
+  $('#copy-uninstall').addEventListener('click', async (e) => {
+    e.preventDefault();
+    const a = e.currentTarget;
+    try { await navigator.clipboard.writeText('linger uninstall'); } catch { /* izin yok */ }
+    if (a.dataset.busy) return;
+    a.dataset.busy = '1';
+    a.textContent = 'copied';
+    setTimeout(() => { a.textContent = 'linger uninstall'; delete a.dataset.busy; }, 1400);
+  });
+
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* Ust cubuk: sayfa kayinca alt cizgi belirsin. */
+  const top = $('#top');
+  const onScroll = () => top.classList.toggle('scrolled', scrollY > 8);
+  addEventListener('scroll', onScroll, { passive: true }); onScroll();
+
+  /* Bolumler gorunur olunca bir kez yukselsin. */
+  const io = new IntersectionObserver((es) => {
+    for (const e of es) if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+  }, { threshold: 0.15 });
+  document.querySelectorAll('.reveal, #meter-card').forEach((n) => io.observe(n));
+
+  /* ── ASCII manzara ──
+     Resim yok: terminalin kendi malzemesiyle — karakter yogunlugu —
+     bir ufuk, bir gunes ve iki tepe sirasi. Yavasca kayiyor. */
+  const RAMP = ' .·:-=+*#%@';
+  const ascii = $('#ascii'), scene = $('#scene');
+  let cols = 0, rows = 0, t = 0;
+
+  function measure() {
+    const r = scene.getBoundingClientRect();
+    cols = Math.ceil(r.width / 6.6) + 1;
+    rows = Math.ceil(r.height / 13) + 1;
+  }
+
+  function field(x, y, t) {
+    // x, y: 0..1 — gunes pencerenin ustunde, altinda iki tepe sirasi.
+    const n = Math.sin(x * 91.3 + y * 57.1) * 43758.5453, grain = n - Math.floor(n);
+    const dx = (x - 0.5) * 1.7, dy = y - 0.17;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    let v = d < 0.13 ? 0.98 : Math.max(0, 0.55 - (d - 0.13) * 2.2);  // gunes + hale
+    if (d > 0.13) v *= 0.55 + 0.45 * Math.cos((d - 0.13) * 60 - t);   // yavas halkalar
+    v += grain < 0.035 ? 0.25 : 0;                                    // seyrek yildiz
+    const h1 = 0.62 + 0.05 * Math.sin(x * 6 + t * 0.3) + 0.025 * Math.sin(x * 19 - t * 0.2);
+    const h2 = 0.78 + 0.05 * Math.sin(x * 4 - t * 0.2 + 1.3) + 0.02 * Math.sin(x * 27 + t * 0.35);
+    if (y > h1) v = 0.3 + (y - h1) * 0.9 + (grain - 0.5) * 0.12;
+    if (y > h2) v = 0.55 + (y - h2) * 1.4 + (grain - 0.5) * 0.12;
+    return Math.min(0.999, Math.max(0, v));
+  }
+
+  function draw() {
+    let s = '';
+    for (let j = 0; j < rows; j++) {
+      const y = j / rows;
+      for (let i = 0; i < cols; i++) s += RAMP[Math.floor(field(i / cols, y, t) * RAMP.length)];
+      s += '\n';
+    }
+    ascii.textContent = s;
+  }
+
+  measure(); draw();
+  new ResizeObserver(() => { measure(); draw(); }).observe(scene);
+  if (!still) {
+    let last = 0;
+    const loop = (now) => {
+      if (now - last > 110) { t += 0.11; draw(); last = now; }
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  }
+
+  /* ── ASCII yildiz (kapanis) ── ✶ alti kollu. */
+  (() => {
+    const W = 44, H = 24, out = [];
+    for (let j = 0; j < H; j++) {
+      let line = '';
+      for (let i = 0; i < W; i++) {
+        const x = (i - W / 2 + 0.5) / (W / 2), y = (j - H / 2 + 0.5) / (H / 2);
+        const r = Math.hypot(x, y), a = Math.atan2(y, x);
+        const arm = Math.pow(Math.abs(Math.cos(3 * a)), 3);
+        let v = Math.max(0, 1 - r / (0.28 + 0.72 * arm)) * 1.25;
+        v += Math.max(0, 0.22 - r) * 2;
+        line += RAMP[Math.min(RAMP.length - 1, Math.floor(v * RAMP.length))];
+      }
+      out.push(line);
+    }
+    $('#ascii-star').textContent = out.join('\n');
+  })();
+
+  /* ── Hero terminali ──
+     Terminal SABIT durur; satir sayisi degismez. Degisen tek sey status
+     line'daki reklam ve sagdaki "ne yapiyor" sayaci. */
+  /* Ornek satirlar — GERCEK marka DEGIL. Gercek bir reklamveren
+     geldiginde, IZNIYLE, adi buraya gelir. */
+  const ADS = [
+    { brand: 'Your product', text: 'what it does, in a few words', cta: 'yourdomain.com' },
+    { brand: 'Your API', text: 'one line, plain text, no images', cta: 'yourdomain.com' },
+    { brand: 'Your tool', text: '80 characters including the domain', cta: 'yourdomain.com' },
+  ];
+  const ACTS = [
+    { label: 'Edit', verb: 'Editing src/auth/middleware.ts' },
+    { label: 'Search', verb: 'Searching for rate limit helpers' },
+    { label: 'Thinking', verb: 'Thinking about token bucket vs. sliding window' },
+  ];
+  const EYEBROWS = [
+    'Terminal-native ad marketplace',
+    'Paid in USDC — no minimum',
+    'Disclosed — every line starts with ✶',
+    'Shown only while you wait',
+  ];
+
+  const el = {
+    ad: $('#ad'), brand: $('#ad-brand'), text: $('#ad-text'), cta: $('#ad-cta'),
+    right: $('#ad-right'), activity: $('#activity'), eyebrow: $('#eyebrow'),
+  };
+  let i = 0, secs = 2.8;
+
+  function paint() {
+    const ad = ADS[i], act = ACTS[i % ACTS.length];
+    el.brand.textContent = ad.brand;
+    el.text.textContent = ad.text;
+    el.cta.textContent = ad.cta;
+    el.eyebrow.textContent = EYEBROWS[i % EYEBROWS.length];
+    el.activity.textContent = act.verb;
+    el.right.textContent = `${act.label} · ${secs.toFixed(1)}s`;
+  }
+  paint();
+
+  if (!still) {
+    setInterval(() => { secs += 0.4; paint(); }, 400);
+    setInterval(() => {
+      el.ad.style.opacity = '0';
+      setTimeout(() => { i = (i + 1) % ADS.length; secs = 0.4; paint(); el.ad.style.opacity = '1'; }, 280);
+    }, 4200);
+  }
+</script>
+<style>
+  /* ── siralama ── */
+  .globe-wrap { position: relative; max-width: 620px; margin: 0 auto; }
+  #globe { display: block; width: 100%; aspect-ratio: 1; cursor: grab; touch-action: pan-y; outline: none; }
+  #globe:focus-visible { outline: 1px dashed var(--line-3); outline-offset: -1px; }
+  .globe-tip {
+    position: absolute; pointer-events: none; transform: translate(-50%, calc(-100% - 14px));
+    background: var(--bg-deep); border: 1px solid var(--line-3); border-radius: 4px;
+    padding: 6px 10px; font-size: 12px; color: var(--ink); white-space: nowrap;
+  }
+  .globe-stats { position: absolute; left: 0; right: 0; bottom: 4%; margin: 0; text-align: center; font-size: 12.5px; color: var(--faint); pointer-events: none; }
+  .globe-stats b { color: var(--accent); font-weight: 400; }
+
+  .board { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; margin-top: 8px; }
+  @media (max-width: 900px) { .board { grid-template-columns: minmax(0, 1fr); } }
+  .board-main { border: 1px solid var(--line-2); border-radius: 6px; background: rgba(236, 231, 225, 0.02); overflow: hidden; }
+  .board-bar { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; padding: 12px; border-bottom: 1px solid var(--line); }
+  .seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 4px; overflow: hidden; }
+  .seg-btn, .seg-select {
+    font-family: var(--mono); font-size: 12.5px; color: var(--muted); background: transparent;
+    border: 0; padding: 7px 12px; cursor: pointer;
+  }
+  .seg-btn + .seg-btn, .seg-btn + .seg-select { border-left: 1px solid var(--line-2); }
+  .seg-btn:hover, .seg-select:hover { color: var(--ink); }
+  .seg-btn.on { background: var(--accent-bg); color: var(--accent); }
+  .seg-select.on { color: var(--accent); background: var(--accent-bg); }
+  .seg-select option { background: var(--bg); color: var(--ink); }
+
+  /* style.css tablolara min-width: 520px veriyor (panelin odeme tablosu, yatay kaydirmali); bu tablo kaydirilmiyor, daraliyor. */
+  .board-table { width: 100%; min-width: 0; border-collapse: collapse; font-size: 13.5px; table-layout: fixed; }
+  .board-table th.num { width: 120px; }
+  .board-table th { text-align: left; font-weight: 400; font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  .board-table td { padding: 12px 14px; border-bottom: 1px solid var(--line); color: var(--ink-soft); }
+  .board-table tbody tr { cursor: pointer; }
+  .board-table tbody tr:hover td { background: rgba(236, 231, 225, 0.025); }
+  .board-table tbody tr.sel td { background: var(--accent-bg); }
+  .board-table tbody tr.sel td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+  .board-table .num { text-align: right; }
+  .board-table .rank { width: 44px; color: var(--faint); }
+  .board-table tr:nth-child(-n+3) .rank { color: var(--accent); }
+  .board-table .who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .board-table .who .nick { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .board-table .earned { color: var(--good); }
+  .flag { font-size: 16px; line-height: 1; width: 22px; text-align: center; flex: none; }
+  @media (max-width: 560px) {
+    .board-table .col-imp { display: none; }
+    .board-table th, .board-table td { padding-left: 10px; padding-right: 10px; }
+    .board-table .rank { width: 34px; }
+    .board-table th.num { width: 84px; }
+  }
+  .board-empty { padding: 28px 16px; text-align: center; }
+
+  .board-card { border: 1px solid var(--line-2); border-radius: 6px; background: rgba(236, 231, 225, 0.02); padding: 18px; display: grid; gap: 14px; }
+  .pc-head { display: flex; align-items: center; gap: 12px; }
+  .pc-avatar { width: 44px; height: 44px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: 15px; color: var(--bg); background: var(--accent); text-transform: uppercase; }
+  .pc-name { font-size: 22px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pc-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .pc-grid > div { border: 1px solid var(--line-2); border-radius: 4px; padding: 10px; display: grid; gap: 4px; min-width: 0; }
+  .pc-grid .wide { grid-column: 1 / -1; }
+  .pc-k { font-family: var(--mono); font-size: 11px; color: var(--faint); white-space: nowrap; }
+  .pc-v { font-family: var(--mono); font-size: 18px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
+  .pc-v.accent { color: var(--accent); font-size: 22px; }
+  .pc-history { border: 1px solid var(--line-2); border-radius: 4px; padding: 10px; display: grid; gap: 8px; }
+  #pc-spark { width: 100%; height: 64px; display: block; }
+</style>
+
+<script type="module">
+  import { api, $, $$, show } from '/app.js';
+  import { mountGlobe, flag, countryName } from '/globe.js';
+
+  /* Siralama — yalnizca `listed` profiller; sunucu adres dondurmuyor.
+     Takma adlar sunucuda dar bir alfabeyle dogrulaniyor ama yine de
+     DOM'a yalnizca textContent ile giriyor. */
+
+  /** Micro → "$0.0450" / "$12.35". 1 USDC alti kucuk tutarlar okunur kalsin. */
+  function money(s) {
+    const v = BigInt(s), whole = v / 1000000n;
+    const frac = (v % 1000000n).toString().padStart(6, '0');
+    // 1 USDC alti: 4 haneye kadar, sondaki sifirlar atilir ama en az 2 kalir.
+    const f = whole > 0n ? frac.slice(0, 2) : frac.slice(0, 4).replace(/0+$/, '').padEnd(2, '0');
+    return '$' + whole.toLocaleString('en-US') + '.' + f;
+  }
+  const int = (n) => Number(n).toLocaleString('en-US');
+
+  const state = { period: 'all', country: '', selected: null };
+  const el = {
+    rows: $('#board-rows'), empty: $('#board-empty'), emptyTitle: $('#board-empty-title'),
+    card: $('#board-card'), select: $('#scope-country'), global: $('#scope-global'),
+    tip: $('#globe-tip'), stats: $('#globe-stats'),
+  };
+
+  const globe = mountGlobe($('#globe'), {
+    onHover(c) {
+      show(el.tip, !!c);
+      if (!c) return;
+      el.tip.textContent = `${flag(c.code)} ${c.name} · ${c.devs} ${c.devs === 1 ? 'developer' : 'developers'}`;
+      el.tip.style.left = c.x + 'px'; el.tip.style.top = c.y + 'px';
+    },
+    onSelect(code) { setCountry(code); $('#board').scrollIntoView({ block: 'start' }); },
+  });
+
+  async function loadCountries() {
+    const { countries } = await api('/v1/leaderboard/countries', { auth: false });
+    globe.setLights(countries);
+    const devs = countries.reduce((a, c) => a + c.devs, 0);
+    el.stats.innerHTML = devs
+      ? `<b>${int(devs)}</b> listed ${devs === 1 ? 'developer' : 'developers'} · <b>${countries.length}</b> ${countries.length === 1 ? 'country' : 'countries'} · drag to spin`
+      : 'drag to spin';
+    for (const c of countries) {
+      const o = document.createElement('option');
+      o.value = c.country; o.textContent = `${flag(c.country)} ${countryName(c.country)}`;
+      el.select.append(o);
+    }
+  }
+
+  function setCountry(code) {
+    state.country = code;
+    el.select.value = code;
+    el.select.classList.toggle('on', !!code);
+    el.global.classList.toggle('on', !code);
+    el.global.setAttribute('aria-pressed', String(!code));
+    loadRows();
+  }
+
+  async function loadRows() {
+    const q = new URLSearchParams({ period: state.period, limit: '50' });
+    if (state.country) q.set('country', state.country);
+    const { rows } = await api('/v1/leaderboard?' + q, { auth: false });
+
+    el.rows.replaceChildren(...rows.map((r) => {
+      const tr = document.createElement('tr');
+      tr.dataset.nick = r.nickname;
+      tr.tabIndex = 0;
+      const rank = r.rank <= 3 ? ['🥇', '🥈', '🥉'][r.rank - 1] : String(r.rank);
+      tr.innerHTML = '<td class="rank"></td><td><span class="who"><span class="flag"></span><span class="nick"></span></span></td><td class="num col-imp"></td><td class="num earned"></td>';
+      tr.cells[0].textContent = rank;
+      tr.querySelector('.flag').textContent = flag(r.country);
+      tr.querySelector('.flag').title = countryName(r.country);
+      tr.querySelector('.nick').textContent = r.nickname;
+      tr.cells[2].textContent = int(r.impressions);
+      tr.cells[3].textContent = money(r.earnedMicros);
+      tr.onclick = () => select(r.nickname);
+      tr.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(r.nickname); } };
+      return tr;
+    }));
+
+    show(el.empty, rows.length === 0);
+    el.emptyTitle.textContent = state.country || state.period !== 'all'
+      ? 'Nobody listed here for this period.' : 'Nobody is listed yet.';
+    const keep = rows.find((r) => r.nickname === state.selected);
+    if (rows.length) select(keep ? keep.nickname : rows[0].nickname);
+    else show(el.card, false);
+  }
+
+  async function select(nick) {
+    state.selected = nick;
+    $$('#board-rows tr').forEach((tr) => tr.classList.toggle('sel', tr.dataset.nick === nick));
+    let d;
+    try { d = await api(`/v1/leaderboard/profile/${encodeURIComponent(nick)}?period=${state.period}`, { auth: false }); }
+    catch { show(el.card, false); return; }
+    if (state.selected !== nick) return;   // bu arada baska satira tiklandi
+
+    $('#pc-avatar').textContent = d.nickname.slice(0, 2);
+    $('#pc-name').textContent = d.nickname;
+    $('#pc-country').textContent = d.country ? `${flag(d.country)} ${countryName(d.country)}` : 'No country set';
+    $('#pc-global').textContent = '#' + d.rank;
+    $('#pc-crank').textContent = d.countryRank ? '#' + d.countryRank : '—';
+    $('#pc-imp').textContent = int(d.impressions);
+    $('#pc-earned').textContent = money(d.earnedMicros);
+
+    const days = d.dailyMicros.map(Number);
+    const total = d.dailyMicros.reduce((a, s) => a + BigInt(s), 0n);
+    $('#pc-avg').textContent = 'avg ' + money((total / BigInt(days.length)).toString()) + '/day';
+    const max = Math.max(...days, 1);
+    const pts = days.map((v, i) => `${(i / (days.length - 1)) * 300},${60 - (v / max) * 54}`);
+    $('#pc-spark').innerHTML =
+      `<polygon points="0,64 ${pts.join(' ')} 300,64" fill="var(--accent-bg)"/>` +
+      `<polyline points="${pts.join(' ')}" fill="none" stroke="var(--accent)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`;
+    show(el.card, true);
+  }
+
+  el.global.onclick = () => setCountry('');
+  el.select.onchange = () => setCountry(el.select.value);
+  $$('#period .seg-btn').forEach((b) => b.onclick = () => {
+    state.period = b.dataset.period;
+    $$('#period .seg-btn').forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', String(x === b)); });
+    loadRows();
+  });
+
+  // Sunucuya ulasilamazsa bolum bos tablo + bos kureyle kalir; sayfanin
+  // geri kalani etkilenmez.
+  loadCountries().catch(() => {});
+  loadRows().catch(() => show(el.empty, true));
+</script>
+</body>
+</html>

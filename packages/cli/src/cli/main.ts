@@ -1,0 +1,409 @@
+#!/usr/bin/env node
+/**
+ * `linger` — kullanicinin gordugu tek yuzey.
+ *
+ * Komutlar ince: butun mantik test edilmis modullerde. Buradaki is
+ * dogrulama, sıralama ve ANLASILIR CIKTI.
+ */
+
+import { resolve, dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { existsSync, realpathSync } from 'node:fs'
+import { install, uninstall, diagnose, readSettings, detectConflicts, SETTINGS_PATH } from '../settings.js'
+import { LINGER_HOME, SOCKET_PATH } from '../ipc.js'
+import * as daemon from './daemon-control.js'
+import { out, ok, warn, info, fail, rows, dim, bold, green, yellow, red, orange, banner, usdc } from './output.js'
+import { cmdLogin, cmdLogout, cmdWhoami } from './login.js'
+import { cmdBalance } from './balance.js'
+import { cmdProfile } from './profile.js'
+import { loadCredentials, shortAddress } from '../credentials.js'
+import { VERSION } from '../version.js'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+
+/**
+ * Paket kokunu ARAYARAK bul.
+ *
+ * Sabit bir `../..` yazmak kirilgan: kaynakta `src/cli/` icindeyiz ama
+ * derlenince `dist/` oluyoruz ve seviye sayisi degisiyor. `package.json`'i
+ * yukari dogru aramak her iki duzende de calisir.
+ */
+function findPkgRoot(from: string): string {
+  let d = from
+  for (let i = 0; i < 6; i++) {
+    if (existsSync(join(d, 'package.json'))) return d
+    const up = dirname(d)
+    if (up === d) break
+    d = up
+  }
+  return resolve(from, '..')
+}
+const PKG_ROOT = findPkgRoot(HERE)
+
+/** Derlenmis shim — TypeScript kaynagi DEGIL (ADR-003 olcumu). */
+const shimPath = (): string => {
+  const compiled = join(PKG_ROOT, 'dist', 'statusline.mjs')
+  return existsSync(compiled) ? compiled : join(PKG_ROOT, 'src', 'shim', 'statusline.ts')
+}
+const hookPath = (): string => join(PKG_ROOT, 'dist', 'hook.mjs')
+const daemonEntry = (): string => join(PKG_ROOT, 'dist', 'daemon.mjs')
+
+const statusLineCommand = (): string => `${process.execPath} ${shimPath()}`
+
+/* ─────────────────────────── komutlar ─────────────────────────── */
+
+/**
+ * Paket GECICI bir konumdan mi calisiyor?
+ *
+ * `npx lingersh init` paketi `~/.npm/_npx/<hash>/` altina indirir. Kurulum
+ * oraya MUTLAK YOL yazar — statusLine, uc hook ve daemon girisi hep o
+ * klasoru gosterir.
+ *
+ * O klasor gecicidir: `npm cache clean`, farkli bir surum cekmek ya da bir
+ * disk temizleyici silebilir. Silindigi gun statusLine olmayan bir dosyayi
+ * cagirmaya baslar. Kullanici hicbir sey degistirmemistir, reklam durur ve
+ * sebebi gorunmez — ay sonra "bir ara calisiyordu" diye geri gelir.
+ *
+ * Bu yuzden kurmayi REDDEDIYORUZ. Bugun calisip yarin sessizce bozulan bir
+ * kurulum, en bastan kurulmamis olmaktan kotudur.
+ */
+function geciciKonum(): string | null {
+  const p = PKG_ROOT
+  if (p.includes('/_npx/') || p.includes('\\_npx\\')) return 'npx cache'
+  if (p.includes('/.npm/_cacache') || p.includes('/tmp/') || p.startsWith('/private/tmp/')) {
+    return 'temporary folder'
+  }
+  return null
+}
+
+async function cmdInit(argv: string[]): Promise<void> {
+  banner()
+  const force = argv.includes('--force')
+  const withSpinner = argv.includes('--spinner')
+
+  const gecici = geciciKonum()
+  if (gecici && !argv.includes('--allow-temp')) {
+    fail(
+      'LNG-1004',
+      `Linger is running from a ${gecici} — cannot install from here`,
+      'Install it permanently:  npm i -g lingersh && linger init',
+    )
+  }
+
+  // 1. Cakisma var mi? ONCE sor, sonra yaz.
+  let settings
+  try { settings = readSettings() } catch (e) {
+    fail('LNG-1003', 'Could not read the Claude Code settings file',
+      `${SETTINGS_PATH} may contain broken JSON. Fix it and try again — we didn't touch the file.`)
+  }
+  const conflicts = detectConflicts(settings).filter((c) => !c.ours)
+
+  if (conflicts.length > 0 && !force) {
+    warn('You already have settings — we did NOT overwrite them:')
+    out()
+    for (const c of conflicts) info(`${bold(c.field)}  ${dim(c.current)}`)
+    out()
+    info(`To install anyway: ${bold('linger init --force')}`)
+    info(dim('(your current setting is backed up, `linger uninstall` won\'t restore it —'))
+    info(dim(' the backup lives under ~/.claude/linger-backups/)'))
+    out()
+  }
+
+  // 2. settings.json
+  const result = install({
+    statusLineCommand: statusLineCommand(),
+    hookCommand: `${process.execPath} ${hookPath()}`,
+    refreshIntervalSec: 1,
+    ...(withSpinner ? { spinnerVerbs: ['✶ Linger'] } : {}),
+    force,
+  })
+
+  for (const f of result.changed) ok(`${f} installed`)
+  if (result.backupPath) info(dim(`backup: ${result.backupPath}`))
+
+  // 3. Daemon
+  out()
+  const started = await daemon.start({ entry: daemonEntry() })
+  if ('error' in started) {
+    if (started.error.includes('already')) ok('daemon already running')
+    else fail('LNG-1001', 'Could not start the daemon', started.error)
+  } else {
+    ok(`daemon running (pid ${started.pid})`)
+  }
+
+  // 4. Giris yapilmadiysa BUNU SOYLE.
+  //
+  // Sunucu bagli degilken daemon icine gomulu ornek reklamlari gosteriyor.
+  // Ekranda her sey calisiyor gorunuyor ama hicbir gosterim hicbir yere
+  // yazilmiyor. Bunu sessiz gecmek, kullaniciyi kazandigini SANARAK
+  // beklemeye birakmak olurdu.
+  if (!loadCredentials()) {
+    out()
+    warn(`${bold('demo mode')} — no wallet connected, ${bold('no earnings')}`)
+    info(dim('the ads you see are samples; nothing is being recorded'))
+    info(`to actually earn: ${bold('linger login')}`)
+  }
+
+  // 5. Ne degistigini SOYLE — kullanicidan bir sey aldik.
+  out()
+  out(`  ${bold('Good to know')}`)
+  info('• Claude Code no longer shows some keyboard hints on the bottom line')
+  info(`  (like ${dim('esc to interrupt')}) — happens whenever a custom statusLine is set`)
+  if (withSpinner) info('• Spinner words changed')
+  info(`• To undo: ${bold('linger uninstall')} — we remove our own footprint, we don't touch your settings`)
+  out()
+  info(`Open a new Claude Code session. ${dim('It will show up on the bottom line while you wait.')}`)
+  out()
+}
+
+async function cmdDoctor(): Promise<void> {
+  banner()
+  const expected = statusLineCommand()
+  const d = diagnose(expected)
+  const alive = await daemon.isAlive()
+  const health = alive ? await daemon.ask({ t: 'health' }) : null
+
+  const checks: [string, boolean, string][] = [
+    ['settings.json', d.installed, d.detail],
+    ['daemon', alive, alive ? `pid ${daemon.readPid() ?? '?'}` : 'not running — `linger init`'],
+    ['socket', existsSync(SOCKET_PATH), SOCKET_PATH],
+    ['shim', existsSync(shimPath()), shimPath().endsWith('.ts')
+      ? 'TypeScript source — the compiled version is faster' : 'compiled'],
+    ['spinner', d.spinnerOwner !== 'baskasinin', d.spinnerDetail ?? 'not installed'],
+  ]
+
+  for (const [name, good, detail] of checks) {
+    out(`  ${good ? green('✓') : red('✗')} ${bold(name.padEnd(14))} ${dim(detail)}`)
+  }
+
+  if (d.spinnerOwner === 'baskasinin') {
+    out()
+    warn('spinnerVerbs belongs to ANOTHER TOOL — spinner sync is silently off.')
+    info('We don\'t touch it, per the rule of never overwriting a user\'s own')
+    info('setting. Another plugin using the same surface may be installed;')
+    info('some of these write their value back within seconds, so even')
+    info('`--force` wouldn\'t stick. Remove that tool first, then run `linger init --spinner`.')
+  }
+
+  if (d.hijacked) {
+    out()
+    warn('Your statusLine setting has been changed by ANOTHER TOOL.')
+    info('Another plugin using the same line may be installed; some of these')
+    info('periodically restore their own setting.')
+    info(`To reinstall: ${bold('linger init --force')}`)
+  }
+
+  if (health?.t === 'health') {
+    out()
+    const i = health.info
+    rows([
+      ['status', i.phase],
+      ['queued', `${i.queuedImpressions} impression(s)`],
+      ['ads', `${i.adsCached} cached`],
+      ['render', i.renderEnabled ? 'on' : 'off'],
+      ...(i.paused ? [['paused', 'yes — `linger resume`'] as const] : []),
+      ...(i.lastError ? [['last error', i.lastError] as const] : []),
+    ])
+  }
+  out()
+}
+
+async function cmdUninstall(): Promise<void> {
+  banner()
+  await daemon.stop()
+  ok('daemon stopped')
+
+  const r = uninstall()
+  if (r.removed.length === 0) warn('couldn\'t find any of our own settings in settings.json')
+  for (const f of r.removed) ok(`${f} removed`)
+  if (r.backupPath) info(dim(`backup: ${r.backupPath}`))
+
+  /**
+   * Spinner ACIK OTURUMDA hemen kaybolmaz — bunu SOYLEMEK zorundayiz.
+   *
+   * Claude Code `spinnerVerbs`'u canli okumuyor; acik oturum, dosyadan
+   * silinmis olsa bile son okudugu degerle devam ediyor. statusLine ise
+   * her tikta yeniden calistigi icin aninda gidiyor.
+   *
+   * Sonuc: "spinnerVerbs kaldirildi" yazip kullanicinin ekraninda markayi
+   * birakmak. Kaldirma komutunun isini yapmadigini dusunur, hakli olarak.
+   * Dosyada yapacak bir sey kalmadi; tek dogru davranis ne oldugunu
+   * soylemek.
+   */
+  if (r.removed.includes('spinnerVerbs')) {
+    out()
+    info(`Spinner words won't change ${bold('in an open session')} —`)
+    info(dim('Claude Code doesn\'t re-read them. Its own words return in a new session.'))
+  }
+
+  out()
+  info('Your other settings were untouched.')
+  info(`Your earnings are still there — ${bold('linger init')} brings you back.`)
+  out()
+}
+
+async function cmdStatus(): Promise<void> {
+  banner()
+  const health = await daemon.ask({ t: 'health' })
+  if (health === null || health.t !== 'health') {
+    fail('LNG-1001', 'Daemon is not running', '`linger init` to start it')
+  }
+  const i = health.info
+  rows([
+    ['version', i.version],
+    ['status', i.phase === 'idle' ? dim('waiting') : green(i.phase)],
+    ['uptime', `${Math.round(i.uptimeMs / 60_000)} min`],
+    ['queued', `${i.queuedImpressions} impression(s)`],
+    ['active session', i.activeSession ?? dim('none')],
+  ])
+  out()
+}
+
+async function cmdPause(paused: boolean): Promise<void> {
+  const alive = await daemon.isAlive()
+  if (!alive) fail('LNG-1001', 'Daemon is not running', '`linger init` to start it')
+
+  // Once GERCEKTEN durdur, sonra soyle.
+  //
+  // Onceden bu komut yalnizca mesaj basiyordu: kullanici duraklattigini
+  // sanip reklamlar donmeye devam ediyordu. Bir arayuzun yapabilecegi en
+  // kotu sey, olmayan bir seyi olmus gibi gostermek.
+  const res = await daemon.ask({ t: 'pause', on: paused })
+  if (!res || res.t !== 'ok') {
+    fail('LNG-1001', paused ? 'Could not pause' : 'Could not resume', 'daemon did not respond')
+  }
+
+  out(paused ? `${yellow('⏸')} paused — ads won't be shown` : `${green('▶')} resumed`)
+  if (paused) info(dim('persists: stays paused even if you restart · `linger resume`'))
+}
+
+/**
+ * Daemon'i durdurup yeniden baslatir.
+ *
+ * `linger login` sonrasi gerekiyor: daemon token'i YALNIZCA acilista okuyor.
+ * Bu komut olmadan kullanicinin "kapat ac" demesi gerekirdi ve `login`
+ * ciktisi zaten `linger restart` diyordu — olmayan bir komutu tarif eden
+ * bir mesaj, hic mesaj olmamasindan kotu.
+ */
+async function cmdRestart(): Promise<void> {
+  banner()
+  const durdu = await daemon.stop()
+  if (durdu) ok('daemon stopped')
+
+  const started = await daemon.start({ entry: daemonEntry() })
+  if ('error' in started) fail('LNG-1001', 'Could not start the daemon', started.error)
+  ok(`daemon running (pid ${started.pid})`)
+
+  const creds = loadCredentials()
+  if (creds) info(dim(`wallet ${shortAddress(creds.publisherId)}`))
+  else info(dim('no wallet connected — `linger login`'))
+  out()
+}
+
+function cmdHelp(): void {
+  banner()
+  out(`  ${dim('Turns your AI coding tool\'s wait time into earnings.')}`)
+  out()
+  rows([
+    ['linger init', 'install and start'],
+    ['linger login', 'connect your wallet — earnings go here'],
+    ['linger balance', 'show your earnings'],
+    ['linger profile', 'leaderboard nickname, country, listed or not'],
+    ['linger whoami', 'show the connected wallet'],
+    ['linger logout', 'disconnect the wallet'],
+    ['linger doctor', 'diagnose the setup'],
+    ['linger status', 'daemon status'],
+    ['linger restart', 'restart the daemon'],
+    ['linger pause', 'pause ads temporarily'],
+    ['linger resume', 'resume'],
+    ['linger uninstall', 'remove — we clean up our own footprint'],
+    ['linger version', 'print the version'],
+  ])
+  out()
+  rows([
+    ['--force', 'overwrite the existing setting'],
+    ['--spinner', 'also install the spinner layer'],
+  ])
+  out()
+}
+
+/* ─────────────────────────── giris ─────────────────────────── */
+
+export async function main(argv: readonly string[]): Promise<void> {
+  const [cmd = 'help', ...rest] = argv
+
+  switch (cmd) {
+    case 'init': return cmdInit(rest)
+    case 'doctor': return cmdDoctor()
+    case 'uninstall': return cmdUninstall()
+    case 'status': return cmdStatus()
+    case 'restart': return cmdRestart()
+    case 'pause': return cmdPause(true)
+    case 'resume': return cmdPause(false)
+    // Daemon'i yeniden baslatma yetenegi ICERI VERILIYOR: kimlik degisince
+    // daemon'in onu almasi sart, yoksa kazanc eski cuzdana yazilir.
+    // Calismiyorsa `null` — o zaman baslatacak bir sey yok.
+    case 'login': return cmdLogin(rest, async () => {
+      if (!(await daemon.isAlive())) return null
+      await daemon.stop()
+      return daemon.start({ entry: daemonEntry() })
+    })
+    case 'logout': return cmdLogout()
+    case 'whoami': return cmdWhoami()
+    case 'balance': return cmdBalance(rest)
+    case 'profile': return cmdProfile(rest)
+    case 'help': case '--help': case '-h': return cmdHelp()
+    /**
+     * Surum. Daemon'a SORMAZ — herkesin ilk denedigi komut bu ve daemon
+     * calismiyorken de cevap vermeli. `linger status` daemon'dan okuyor,
+     * o ayri bir sey.
+     *
+     * Cikti suslenmemis tek satir: hata bildiren biri bunu kopyalayip
+     * yapistiriyor, betikler de bunu ayristiriyor.
+     */
+    case 'version': case '--version': case '-v':
+      out(VERSION)
+      return
+    default:
+      fail('LNG-9001', `unknown command: ${cmd}`, '`linger help` to see the commands')
+  }
+}
+
+/**
+ * Bu dosya dogrudan mi calistirildi, yoksa import mu edildi?
+ *
+ * Onceden dosya ADINI karsilastiriyordu:
+ *
+ *     import.meta.url.endsWith(process.argv[1].split('/').pop())
+ *
+ * Ve bu, paketin npm'den kurulan halini TAMAMEN ISLEVSIZ birakiyordu.
+ * `bin` girdisi `linger` adinda bir sembolik bag uretiyor — uzantisiz. O
+ * zaman karsilastirma `".../linger.mjs".endsWith("linger")` oluyor, yani
+ * false; `main()` hic cagrilmiyor. Program cikis kodu 0 ile, TEK BIR
+ * KARAKTER BASMADAN sonlaniyordu.
+ *
+ * Belirtisi yoktu: hata yok, uyari yok, cikis kodu basarili. `npx lingersh
+ * init` yazan biri hicbir sey olmadigini goruyordu. Gelistirmede hic
+ * gorunmedi cunku orada `node dist/linger.mjs` ile, yani dosya adiyla
+ * cagriliyor.
+ *
+ * Simdi iki yolun da SEMBOLIK BAGLARI COZULMUS hali karsilastiriliyor.
+ */
+function dogrudanCalistirildi(): boolean {
+  const argv1 = process.argv[1]
+  if (!argv1) return false
+  try {
+    return realpathSync(argv1) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    // Yol okunamiyorsa calistirmiyoruz: yanlis tarafta hata yapmak,
+    // import edilen bir modulun kendini calistirmasi olurdu.
+    return false
+  }
+}
+
+if (dogrudanCalistirildi()) {
+  main(process.argv.slice(2)).catch((e: unknown) => {
+    // Stack trace ASLA kullaniciya gitmez.
+    fail('LNG-9001', 'Unexpected error', e instanceof Error ? e.message : String(e))
+  })
+}

@@ -1,0 +1,19 @@
+{
+  "name": "linger",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.9.0",
+  "scripts": {
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "build": "pnpm -r build"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
+    "@solana/web3.js": "^1.98.4",
+    "@solana/spl-token": "^0.4.13",
+    "tweetnacl": "^1.0.3",
+    "bs58": "^6.0.0"
+  }
+}

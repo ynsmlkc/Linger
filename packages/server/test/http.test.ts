@@ -1,0 +1,573 @@
+/**
+ * HTTP katmani testleri.
+ *
+ * Hono'nun `app.request()` metodu gercek bir istek kosuyor — sunucu ayaga
+ * kaldirmaya gerek yok.
+ */
+
+import { describe, it, expect, beforeEach } from 'vitest'
+import { fixedClock, micros, FALLBACK_CONFIG, PROTOCOL_HEADER } from '@linger/protocol'
+import type { RemoteConfig, ImpressionEvent } from '@linger/protocol'
+import type { PaymentRail, PayoutBatch, SubmissionReceipt } from '@linger/payments'
+import { createApp } from '../src/http/app.js'
+import { RateLimiter } from '../src/http/rate-limit.js'
+import { TokenStore, hashToken } from '../src/http/auth.js'
+import { Pipeline } from '../src/pipeline.js'
+import { Ledger } from '../src/ledger/ledger.js'
+import { MemoryLedgerStore } from '../src/ledger/memory-store.js'
+import { accountId, PLATFORM_REVENUE } from '../src/ledger/accounts.js'
+import { WithdrawService } from '../src/payouts/withdraw.js'
+import { MemoryPayoutStore } from '../src/payouts/store.js'
+import type { Campaign } from '../src/ads/selector.js'
+
+const PUB = 'pub-1'
+const ADV = 'adv-1'
+const DAEMON_TOKEN = 'lng_daemon_token_0123456789abcdef'
+const WALLET_TOKEN = 'lng_wallet_token_0123456789abcdef'
+const REVOKED_TOKEN = 'lng_revoked_token_0123456789abcd'
+
+let clock: ReturnType<typeof fixedClock>
+let app: ReturnType<typeof createApp>
+let pipeline: Pipeline
+let ledger: Ledger
+let config: RemoteConfig
+let tokens: TokenStore
+let seq = 0
+
+beforeEach(() => {
+  clock = fixedClock(1_700_000_000_000)
+  seq = 0
+  const ids = { impressionId: () => `id-${seq++}`, randomHex: (n: number) => String(seq++).padStart(n * 2, 'a') }
+
+  ledger = new Ledger(new MemoryLedgerStore(clock, () => `led-${seq++}`), clock, () => `led-${seq++}`)
+  ledger.deposit({ advertiserId: ADV, amount: micros(100_000_000n), topupId: 't1' })
+
+  const campaigns: Campaign[] = [{
+    id: 'c1', advertiserId: ADV, bidCpm: micros(300_000_000n), revShareBps: 5000,
+    creative: { brand: 'Firecrawl', text: 'docs to LLM-ready markdown' },
+    status: 'active', frequencyCap: 1,
+  }]
+
+  pipeline = new Pipeline({
+    clock, ids, ledger, campaigns: () => campaigns,
+    minImpressionMs: 10_000, minClientVersion: '1.0.0',
+    pendingMs: 24 * 3600_000, dailyCap: 400,
+  })
+
+  tokens = new TokenStore()
+  tokens.add({ id: 'tok-daemon', publisherId: PUB, tokenHash: hashToken(DAEMON_TOKEN),
+    scopes: ['report:impressions', 'read:balance', 'withdraw:balance'], clientVersion: null, revokedAt: null, lastSeenAt: null })
+  tokens.add({ id: 'tok-wallet', publisherId: PUB, tokenHash: hashToken(WALLET_TOKEN),
+    scopes: ['wallet:write', 'read:balance'], clientVersion: null, revokedAt: null, lastSeenAt: null })
+  tokens.add({ id: 'tok-revoked', publisherId: PUB, tokenHash: hashToken(REVOKED_TOKEN),
+    scopes: ['report:impressions'], clientVersion: null, revokedAt: clock.now(), lastSeenAt: null })
+
+  config = { ...FALLBACK_CONFIG, renderEnabled: true, minClientVersion: '1.0.0',
+    surfaces: { statusline: true, spinnerVerb: true, spinnerTip: true } }
+
+  app = createApp({
+    clock, ids, pipeline, ledger, tokens,
+    config: () => config,
+    ipSalt: 'test-salt',
+    payoutThreshold: micros(10_000_000n),
+    // Butce testleri yuzlerce teslimat istiyor; hiz siniri ayri test ediliyor.
+    adRateLimit: new RateLimiter({ now: () => clock.now(), capacity: 1_000_000 }),
+  })
+})
+
+/** Hono'nun Response.json() `unknown` doner; testlerde kisa yol. */
+const asJson = async (r: Response): Promise<any> => r.json()
+
+const auth = (token = DAEMON_TOKEN, version = '1.0.0'): Record<string, string> => ({
+  authorization: `Bearer ${token}`,
+  'x-linger-client-version': version,
+  'content-type': 'application/json',
+})
+
+describe('yetki', () => {
+  it('token yoksa 401', async () => {
+    const r = await app.request('/v1/ads/next', { method: 'POST' })
+    expect(r.status).toBe(401)
+    expect((await asJson(r)).code).toBe('LNG_2001')
+  })
+
+  it('iptal edilmis token 401', async () => {
+    const r = await app.request('/v1/ads/next', { method: 'POST', headers: auth(REVOKED_TOKEN) })
+    expect(r.status).toBe(401)
+    expect((await asJson(r)).code).toBe('LNG_2002')
+  })
+
+  it('kapsam yetmiyorsa 403 — daemon token\'i cuzdan degistiremez', async () => {
+    // Cuzdan token'i gosterim raporlayamaz ve tersi.
+    const r = await app.request('/v1/ads/next', { method: 'POST', headers: auth(WALLET_TOKEN) })
+    expect(r.status).toBe(403)
+    expect((await asJson(r)).code).toBe('LNG_2003')
+  })
+
+  it('bakiyeyi ikisi de okuyabilir', async () => {
+    for (const t of [DAEMON_TOKEN, WALLET_TOKEN]) {
+      expect((await app.request('/v1/me/balance', { headers: auth(t) })).status).toBe(200)
+    }
+  })
+})
+
+describe('ADR-016 — surum kapisi', () => {
+  it('eski istemci 426 alir', async () => {
+    config = { ...config, minClientVersion: '2.0.0' }
+    const r = await app.request('/v1/ads/next', { method: 'POST', headers: auth(DAEMON_TOKEN, '1.5.0') })
+    expect(r.status).toBe(426)
+    expect((await asJson(r)).code).toBe('LNG_1005')
+  })
+
+  it('yeni istemci gecer', async () => {
+    config = { ...config, minClientVersion: '2.0.0' }
+    const r = await app.request('/v1/ads/next', { method: 'POST', headers: auth(DAEMON_TOKEN, '2.0.0') })
+    expect(r.status).toBe(200)
+  })
+})
+
+describe('ADR-008 — kill switch', () => {
+  it('render kapaliysa reklam servis edilmez', async () => {
+    config = { ...config, renderEnabled: false }
+    const r = await app.request('/v1/ads/next', { method: 'POST', headers: auth() })
+    expect(r.status).toBe(503)
+    expect((await asJson(r)).code).toBe('LNG_3005')
+  })
+
+  it('config ucu YETKI ISTEMEZ — kill switch her istemciye ulasmali', async () => {
+    const r = await app.request('/v1/config')
+    expect(r.status).toBe(200)
+    expect((await asJson(r)).renderEnabled).toBe(true)
+  })
+})
+
+describe('POST /v1/ads/next', () => {
+  it('reklam ve nonce doner', async () => {
+    const r = await app.request('/v1/ads/next', { method: 'POST', headers: auth() })
+    const body = await asJson(r)
+    expect(body.campaignId).toBe('c1')
+    expect(body.nonce).toHaveLength(32)
+    expect(body.creative.brand).toBe('Firecrawl')
+  })
+
+  it('FIYAT GONDERILMEZ — ADR-011', () => {
+    // Fiyat sunucu tarafinda dondurulur. Istemciye gondermek gereksiz ve
+    // manipulasyon yuzeyi.
+    return Promise.resolve(app.request('/v1/ads/next', { method: 'POST', headers: auth() }))
+      .then(asJson)
+      .then((b: any) => {
+        expect(b).not.toHaveProperty('rate')
+        expect(b).not.toHaveProperty('rateMicros')
+        expect(JSON.stringify(b)).not.toMatch(/rate/i)
+      })
+  })
+
+  it('gosterecek kampanya yoksa 204 — hata degil', async () => {
+    // Butce 100.000.000 micro, gosterim basina 300.000 → 333 teslimat.
+    // Teslimat rezerve tuttugu icin bu dongu SONLU; tutmasaydi sonsuz olurdu.
+    let served = 0
+    for (let i = 0; i < 500; i++) {
+      const r = await app.request('/v1/ads/next', { method: 'POST', headers: auth() })
+      if (r.status === 204) break
+      served++
+    }
+    expect(served, 'butce kadar teslimat, fazlasi degil').toBe(333)
+    const r = await app.request('/v1/ads/next', { method: 'POST', headers: auth() })
+    expect(r.status).toBe(204)
+  })
+
+  it('teslimat butceyi ASAMAZ — raporlamadan once bile rezerve', async () => {
+    // Teslimat rezerve etmeseydi istemci sinirsiz reklam cekip hepsini
+    // raporlayarak butceyi asabilirdi.
+    const before = pipeline.spendable(ADV)
+    await app.request('/v1/ads/next', { method: 'POST', headers: auth() })
+    expect(pipeline.spendable(ADV), 'hemen dusmeli').toBe(before - 300_000n)
+  })
+})
+
+describe('POST /v1/impressions', () => {
+  const ev = (nonce: string, over: Partial<ImpressionEvent> = {}): ImpressionEvent => ({
+    id: '01HQRS7X8N9P2K3M4V5W6Y7Z8A', campaignId: 'c1', nonce, sessionId: 's1',
+    surface: 'statusline', durationMs: 15_000, clientTs: clock.now(),
+    projectKey: 'f'.repeat(64), clientVersion: '1.0.0', os: 'darwin', arch: 'arm64',
+    ...over,
+  })
+
+  // Reklam ekranda kaldigi kadar zaman gecer — sunucu teslimattan once
+  // biten bir gosterimi kabul etmez.
+  const post = (events: ImpressionEvent[], headers = auth()) => {
+    clock.advance(15_000)
+    return app.request('/v1/impressions', { method: 'POST', headers, body: JSON.stringify({ events }) })
+  }
+
+  it('gecerli gosterim kabul edilir', async () => {
+    const { nonce } = await asJson(await app.request('/v1/ads/next', { method: 'POST', headers: auth() }))
+    const body = await asJson(await post([ev(nonce)]))
+    expect(body.accepted).toHaveLength(1)
+  })
+
+  it('kismi basari — iyi kayitlar kabul, kotuler reddedilir', async () => {
+    // Toptan hata donmek istemciyi iyi kayitlari da yeniden gondermeye zorlardi.
+    const a = await asJson(await app.request('/v1/ads/next', { method: 'POST', headers: auth() }))
+    const b = await asJson(await app.request('/v1/ads/next', { method: 'POST', headers: auth() }))
+    const body = await asJson(await post([
+      ev(a.nonce, { id: '01HQRS7X8N9P2K3M4V5W6Y7Z81' }),
+      ev(b.nonce, { id: '01HQRS7X8N9P2K3M4V5W6Y7Z82', durationMs: 100 }),
+    ]))
+
+    expect(body.accepted).toHaveLength(1)
+    expect(body.rejected).toHaveLength(1)
+    expect(body.rejected[0].reason).toMatch(/sure/)
+  })
+
+  it('bozuk govde 400', async () => {
+    const r = await app.request('/v1/impressions', {
+      method: 'POST', headers: auth(), body: '{"events":[{"id":"kisa"}]}',
+    })
+    expect(r.status).toBe(400)
+  })
+
+  it('§10 — ham IP hicbir yere yazilmaz, yalnizca hash', async () => {
+    const { nonce } = await asJson(await app.request('/v1/ads/next', { method: 'POST', headers: auth() }))
+    await post([ev(nonce)], { ...auth(), 'x-forwarded-for': '203.0.113.42, 10.0.0.1' })
+
+    const stored = pipeline.impressions()[0]!
+    expect(stored.ipHash).not.toContain('203.0.113')
+    expect(stored.ipHash).toMatch(/^[0-9a-f]{32}$/)
+  })
+
+  it('bilinmeyen alanlar sessizce dusurulur — ileri uyumluluk', async () => {
+    const { nonce } = await asJson(await app.request('/v1/ads/next', { method: 'POST', headers: auth() }))
+    clock.advance(15_000)
+    const r = await app.request('/v1/impressions', {
+      method: 'POST', headers: auth(),
+      body: JSON.stringify({ events: [{ ...ev(nonce), gelecekteAlan: 'x' }] }),
+    })
+    expect((await asJson(r)).accepted).toHaveLength(1)
+  })
+})
+
+describe('GET /v1/me/balance', () => {
+  it('bekleyen ve odenebilir ayri gosterilir', async () => {
+    const { nonce } = await asJson(await app.request('/v1/ads/next', { method: 'POST', headers: auth() }))
+    clock.advance(15_000)
+    await app.request('/v1/impressions', {
+      method: 'POST', headers: auth(),
+      body: JSON.stringify({ events: [{
+        id: '01HQRS7X8N9P2K3M4V5W6Y7Z8A', campaignId: 'c1', nonce, sessionId: 's1',
+        surface: 'statusline', durationMs: 15_000, clientTs: clock.now(),
+        projectKey: 'f'.repeat(64), clientVersion: '1.0.0', os: 'darwin', arch: 'arm64',
+      }] }),
+    })
+
+    const b = await asJson(await app.request('/v1/me/balance', { headers: auth() }))
+    expect(b.pendingMicros, 'dogrulanmadi, henuz para degil').toBe('150000')
+    expect(b.payableMicros).toBe('0')
+  })
+
+  it('odeme bloke ise SEBEBI gosterilir', async () => {
+    const b = await asJson(await app.request('/v1/me/balance', { headers: auth() }))
+    expect(b.blockedReason).toMatch(/threshold/)
+  })
+
+  it('esik gecilince sebep null olur', async () => {
+    ledger.postImpression({
+      impressionId: 'big', advertiserId: ADV, publisherId: PUB, campaignId: 'c1',
+      rate: micros(40_000_000n), revShareBps: 5000,
+    })
+    const b = await asJson(await app.request('/v1/me/balance', { headers: auth() }))
+    expect(b.payableMicros).toBe('20000000')
+    expect(b.blockedReason).toBeNull()
+  })
+})
+
+describe('POST /v1/publisher/withdraw', () => {
+  /** Zinciri taklit eder — mutlu yol sabit, ariza modlari withdraw.test.ts'te. */
+  class FakeRail implements PaymentRail {
+    gonderilen: PayoutBatch[] = []
+    #n = 0
+    async validateDestinations(addrs: readonly string[]) {
+      return addrs.map((address) => ({
+        address, onCurve: true, isTokenAccount: false, isMint: false,
+        ataExists: true, ataFrozen: false,
+      }))
+    }
+    async sourceStatus() {
+      return { address: 'HotWallet1111111111111111111111111111111111', usdcBalance: micros(10n ** 12n), availableLamports: 10n ** 9n }
+    }
+    async prepare(batch: PayoutBatch): Promise<SubmissionReceipt> {
+      this.gonderilen.push(batch)
+      return {
+        batchId: batch.batchId, txHash: `h${++this.#n}`.padEnd(64, '0'),
+        serializedTx: `tx-${batch.batchId}`, recentBlockhash: String(this.#n),
+        lastValidBlockHeight: 250_000_150, feeBid: 100n,
+        opIndex: batch.items.map((it, index) => ({ publisherId: it.publisherId, index })),
+      }
+    }
+    async send() {}
+    async reconcile(r: SubmissionReceipt) {
+      return { state: 'settled' as const, txHash: r.txHash, slot: 1, feeCharged: 100n, opResults: [] }
+    }
+  }
+
+  function appWithWithdraw() {
+    const rail = new FakeRail()
+    const publisherWithdraw = new WithdrawService({
+      clock, ledger, rail, store: new MemoryPayoutStore(),
+      kind: 'publisher',
+      spendable: (p) => ledger.balance(accountId('publisher', p)),
+      newBatchId: () => `w-${seq++}`,
+      log: () => {},
+    })
+    const withApp = createApp({
+      clock, ids: { impressionId: () => `id-${seq++}`, randomHex: (n) => String(seq++).padStart(n * 2, 'a') },
+      pipeline, ledger, tokens,
+      config: () => config, ipSalt: 'test-salt',
+      payoutThreshold: micros(10_000_000n),
+      publisherWithdraw,
+    })
+    return { withApp, rail, publisherWithdraw }
+  }
+
+  it('withdraw:balance kapsami olmayan token reddedilir', async () => {
+    ledger.postImpression({
+      impressionId: 'i1', advertiserId: ADV, publisherId: PUB, campaignId: 'c1',
+      rate: micros(20_000_000n), revShareBps: 5000,
+    })
+    const { withApp } = appWithWithdraw()
+    // WALLET_TOKEN: 'wallet:write' + 'read:balance' tasir, 'withdraw:balance' YOK.
+    const r = await withApp.request('/v1/publisher/withdraw', {
+      method: 'POST', headers: auth(WALLET_TOKEN),
+      body: JSON.stringify({ amountMicros: '1000000' }),
+    })
+    expect(r.status).toBe(403)
+    expect(ledger.balance(accountId('publisher', PUB))).toBe(10_000_000n)   // hicbir sey hareket etmedi
+  })
+
+  it('verified kazanc istege bagli cekilir, iki panelin cevabi da tutarli', async () => {
+    ledger.postImpression({
+      impressionId: 'i1', advertiserId: ADV, publisherId: PUB, campaignId: 'c1',
+      rate: micros(20_000_000n), revShareBps: 5000,
+    })
+    const { withApp } = appWithWithdraw()
+
+    const before = await asJson(await withApp.request('/v1/me/balance', { headers: auth() }))
+    expect(before.withdrawableMicros).toBe('10000000')
+
+    const r = await withApp.request('/v1/publisher/withdraw', {
+      method: 'POST', headers: auth(),
+      body: JSON.stringify({ amountMicros: '10000000' }),
+    })
+    expect(r.status).toBe(200)
+    const body = await asJson(r)
+    expect(body.amountMicros).toBe('10000000')
+    expect(ledger.balance(accountId('publisher', PUB))).toBe(0n)
+  })
+
+  it('bakiyenin ustunde istenirse 400 doner, para hareket etmez', async () => {
+    ledger.postImpression({
+      impressionId: 'i1', advertiserId: ADV, publisherId: PUB, campaignId: 'c1',
+      rate: micros(20_000_000n), revShareBps: 5000,
+    })
+    const { withApp } = appWithWithdraw()
+    const r = await withApp.request('/v1/publisher/withdraw', {
+      method: 'POST', headers: auth(),
+      body: JSON.stringify({ amountMicros: '999999999' }),
+    })
+    expect(r.status).toBe(400)
+    expect(ledger.balance(accountId('publisher', PUB))).toBe(10_000_000n)
+  })
+
+  it('publisherWithdraw baglanmamissa 404 doner', async () => {
+    const r = await app.request('/v1/publisher/withdraw', {
+      method: 'POST', headers: auth(),
+      body: JSON.stringify({ amountMicros: '1000000' }),
+    })
+    expect(r.status).toBe(404)
+  })
+})
+
+describe('/v1/admin/*', () => {
+  const ADMIN_SECRET = 'test-admin-secret-0123456789'
+  const PLATFORM_ADDR = 'GP' + 'P'.repeat(53) + 'RVNU'
+
+  class FakeRail implements PaymentRail {
+    gonderilen: PayoutBatch[] = []
+    #n = 0
+    async validateDestinations(addrs: readonly string[]) {
+      return addrs.map((address) => ({
+        address, onCurve: true, isTokenAccount: false, isMint: false,
+        ataExists: true, ataFrozen: false,
+      }))
+    }
+    async sourceStatus() {
+      return { address: 'HotWallet1111111111111111111111111111111111', usdcBalance: micros(10n ** 12n), availableLamports: 10n ** 9n }
+    }
+    async prepare(batch: PayoutBatch): Promise<SubmissionReceipt> {
+      this.gonderilen.push(batch)
+      return {
+        batchId: batch.batchId, txHash: `h${++this.#n}`.padEnd(64, '0'),
+        serializedTx: `tx-${batch.batchId}`, recentBlockhash: String(this.#n),
+        lastValidBlockHeight: 250_000_150, feeBid: 100n,
+        opIndex: batch.items.map((it, index) => ({ publisherId: it.publisherId, index })),
+      }
+    }
+    async send() {}
+    async reconcile(r: SubmissionReceipt) {
+      return { state: 'settled' as const, txHash: r.txHash, slot: 1, feeCharged: 100n, opResults: [] }
+    }
+  }
+
+  function appWithAdmin() {
+    const platformWithdraw = new WithdrawService({
+      clock, ledger, rail: new FakeRail(), store: new MemoryPayoutStore(),
+      kind: 'platform_revenue',
+      spendable: () => ledger.balance(PLATFORM_REVENUE),
+      newBatchId: () => `w-${seq++}`,
+      log: () => {},
+    })
+    const withApp = createApp({
+      clock, ids: { impressionId: () => `id-${seq++}`, randomHex: (n) => String(seq++).padStart(n * 2, 'a') },
+      pipeline, ledger, tokens,
+      config: () => config, ipSalt: 'test-salt',
+      payoutThreshold: micros(10_000_000n),
+      platformWithdraw, adminSecret: ADMIN_SECRET,
+    })
+    return { withApp, platformWithdraw }
+  }
+
+  it('sir olmadan reddedilir', async () => {
+    const { withApp } = appWithAdmin()
+    const r = await withApp.request('/v1/admin/overview')
+    expect(r.status).toBe(401)
+  })
+
+  it('yanlis sirla reddedilir', async () => {
+    const { withApp } = appWithAdmin()
+    const r = await withApp.request('/v1/admin/overview', {
+      headers: { authorization: 'Bearer yanlis-sir' },
+    })
+    expect(r.status).toBe(401)
+  })
+
+  it('dogru sirla platform payi gorunur — denetimde bulunan eksik burada kapaniyor', async () => {
+    ledger.postImpression({
+      impressionId: 'i1', advertiserId: ADV, publisherId: PUB, campaignId: 'c1',
+      rate: micros(20_000_000n), revShareBps: 5000,
+    })
+    const { withApp } = appWithAdmin()
+    const r = await withApp.request('/v1/admin/overview', {
+      headers: { authorization: `Bearer ${ADMIN_SECRET}` },
+    })
+    expect(r.status).toBe(200)
+    const body = await asJson(r)
+    expect(body.platformRevenueMicros).toBe('10000000')
+    expect(body.withdrawableMicros).toBe('10000000')
+  })
+
+  it('gosterim ozeti gercek pipeline durumunu yansitir', async () => {
+    const { withApp } = appWithAdmin()
+    const { nonce } = await asJson(await withApp.request('/v1/ads/next', { method: 'POST', headers: auth() }))
+    clock.advance(15_000)
+    await withApp.request('/v1/impressions', {
+      method: 'POST', headers: auth(),
+      body: JSON.stringify({ events: [{
+        id: '01HQRS7X8N9P2K3M4V5W6Y7Z8B', campaignId: 'c1', nonce, sessionId: 's1',
+        surface: 'statusline', durationMs: 15_000, clientTs: clock.now(),
+        projectKey: 'f'.repeat(64), clientVersion: '1.0.0', os: 'darwin', arch: 'arm64',
+      }] }),
+    })
+
+    const beforeVerify = await asJson(await withApp.request('/v1/admin/overview', {
+      headers: { authorization: `Bearer ${ADMIN_SECRET}` },
+    }))
+    expect(beforeVerify.impressions.pending).toBe(1)
+    expect(beforeVerify.impressions.verified).toBe(0)
+
+    clock.advance(24 * 3600_000 + 1)
+    pipeline.runVerification()
+
+    const afterVerify = await asJson(await withApp.request('/v1/admin/overview', {
+      headers: { authorization: `Bearer ${ADMIN_SECRET}` },
+    }))
+    expect(afterVerify.impressions.verified).toBe(1)
+    expect(afterVerify.impressions.pending).toBe(0)
+  })
+
+  it('platform payi kendi cuzdanina cekilir', async () => {
+    ledger.postImpression({
+      impressionId: 'i1', advertiserId: ADV, publisherId: PUB, campaignId: 'c1',
+      rate: micros(20_000_000n), revShareBps: 5000,
+    })
+    const { withApp } = appWithAdmin()
+    const r = await withApp.request('/v1/admin/withdraw', {
+      method: 'POST', headers: { authorization: `Bearer ${ADMIN_SECRET}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ amountMicros: '10000000', destination: PLATFORM_ADDR }),
+    })
+    expect(r.status).toBe(200)
+    expect(ledger.balance(PLATFORM_REVENUE)).toBe(0n)
+  })
+
+  it('adminSecret verilmemisse tum ucu 404 doner', async () => {
+    const r = await app.request('/v1/admin/overview')
+    expect(r.status).toBe(404)
+  })
+})
+
+describe('protokol ve hatalar', () => {
+  it('her cevap protokol surumu tasir', async () => {
+    const r = await app.request('/v1/config')
+    expect(r.headers.get(PROTOCOL_HEADER)).toBe('v1')
+  })
+
+  it('bilinmeyen uc 404 + hata zarfi', async () => {
+    const r = await app.request('/v1/yok')
+    expect(r.status).toBe(404)
+    expect((await asJson(r)).code).toBe('LNG_9001')
+  })
+
+  it('hata cevabi stack trace ICERMEZ', async () => {
+    const r = await app.request('/v1/yok')
+    const text = JSON.stringify(await asJson(r))
+    expect(text).not.toMatch(/at \w+|\.ts:|node_modules/)
+  })
+})
+
+describe('POST /v1/ads/next — hiz siniri (PROBLEMS #1.4)', () => {
+  it('kova bitince 429 + retry-after; zaman gecince yeniden acilir', async () => {
+    const limited = createApp({
+      clock, ids: { impressionId: () => `rl-${Math.random()}`, randomHex: (n) => 'a'.repeat(n * 2) },
+      pipeline, ledger, tokens, config: () => config,
+      ipSalt: 'test-salt', payoutThreshold: micros(10_000_000n),
+      adRateLimit: new RateLimiter({ now: () => clock.now(), capacity: 3, refillMs: 10_000 }),
+    })
+    const iste = () => limited.request('/v1/ads/next', { method: 'POST', headers: auth() })
+
+    for (let i = 0; i < 3; i++) expect((await iste()).status).toBe(200)
+    const r = await iste()
+    expect(r.status).toBe(429)
+    expect(r.headers.get('retry-after')).toBe('10')
+
+    clock.advance(10_000)
+    expect((await iste()).status).toBe(200)
+    expect((await iste()).status).toBe(429)
+  })
+
+  it('toplu nonce toplamak imkansiz — bir saatte kova + dolum kadar', async () => {
+    const limiter = new RateLimiter({ now: () => clock.now() })
+    let alinan = 0
+    for (let s = 0; s < 3600; s++) {
+      // Saniyede 10 istek: saldirgan butun nonce'lari toplamaya calisiyor.
+      for (let k = 0; k < 10; k++) if (limiter.take('p') === 0) alinan++
+      clock.advance(1_000)
+    }
+    expect(alinan).toBeLessThanOrEqual(10 + 360)
+  })
+
+  it('yayincilar birbirinin kovasini tuketmez', () => {
+    const limiter = new RateLimiter({ now: () => clock.now(), capacity: 1 })
+    expect(limiter.take('a')).toBe(0)
+    expect(limiter.take('a')).toBeGreaterThan(0)
+    expect(limiter.take('b')).toBe(0)
+  })
+})

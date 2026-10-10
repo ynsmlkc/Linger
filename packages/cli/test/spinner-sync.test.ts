@@ -1,0 +1,261 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { SpinnerSync } from '../src/daemon/spinner-sync.js'
+import { MARKER, type ClaudeSettings } from '../src/settings.js'
+
+let dir = ''
+let path = ''
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), 'linger-spin-'))
+  path = join(dir, 'settings.json')
+})
+afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+const write = (s: ClaudeSettings) => writeFileSync(path, JSON.stringify(s, null, 2))
+const read = (): ClaudeSettings => JSON.parse(readFileSync(path, 'utf8'))
+const ours = { mode: 'replace' as const, verbs: ['✶ Linger'], [MARKER]: true as const }
+
+describe('spinner senkronu', () => {
+  it('aktif reklamin markasini yazar', () => {
+    write({ spinnerVerbs: ours })
+    new SpinnerSync({ path }).sync('Firecrawl')
+    expect(read().spinnerVerbs?.verbs).toEqual(['✶ Firecrawl'])
+  })
+
+  it('ADR-013 — spinner\'da da ifsa glifi zorunlu', () => {
+    // Kullanici `Firecrawl…` gorup Claude Code'un kendi kelimesi sanmamali.
+    write({ spinnerVerbs: ours })
+    new SpinnerSync({ path }).sync('Resend')
+    expect(read().spinnerVerbs?.verbs[0]!.startsWith('✶')).toBe(true)
+  })
+
+  it('reklam degisince spinner da degisir — statusLine ile AYNI marka', () => {
+    write({ spinnerVerbs: ours })
+    const s = new SpinnerSync({ path })
+    s.sync('Firecrawl')
+    s.sync('Resend')
+    expect(read().spinnerVerbs?.verbs).toEqual(['✶ Resend'])
+  })
+
+  it('marka DEGISMEDIYSE dosyaya dokunmaz', () => {
+    // Saniyede bir settings.json yazmak hem gereksiz hem riskli.
+    write({ spinnerVerbs: ours })
+    const s = new SpinnerSync({ path })
+    s.sync('Firecrawl')
+    const first = readFileSync(path, 'utf8')
+
+    writeFileSync(path, first.replace('Firecrawl', 'ELLE-DEGISTIRILDI'))
+    s.sync('Firecrawl')                       // ayni marka
+    expect(readFileSync(path, 'utf8')).toContain('ELLE-DEGISTIRILDI')
+  })
+
+  it('reklam yokken liste BOSALTILMAZ — yeni oturumlar varsayilanlara dusmesin', () => {
+    // Olculdu: Claude Code spinnerVerbs'u oturum basinda okuyup sabitliyor.
+    // Liste bosken acilan bir oturum varsayilan kelimelere duser ve o oturum
+    // boyunca oyle kalir. Dolu birakmak en azindan bir reklam yakalatir.
+    write({ spinnerVerbs: ours })
+    const s = new SpinnerSync({ path })
+    s.sync('Firecrawl')
+    s.sync(null)
+    expect(read().spinnerVerbs?.verbs).toEqual(['✶ Firecrawl'])
+  })
+
+  it('yalnizca kaldirma listeyi bosaltir', () => {
+    write({ spinnerVerbs: ours })
+    const s = new SpinnerSync({ path })
+    s.sync('Firecrawl')
+    s.clear()
+    expect(read().spinnerVerbs?.verbs).toEqual([])
+  })
+})
+
+describe('baskasinin ayarina dokunmaz', () => {
+  it('BIZIM olmayan spinnerVerbs degistirilmez', () => {
+    const rakip = { mode: 'replace' as const, verbs: ['Baska arac'] }
+    write({ spinnerVerbs: rakip })
+    new SpinnerSync({ path }).sync('Firecrawl')
+    expect(read().spinnerVerbs?.verbs).toEqual(['Baska arac'])
+  })
+
+  it('spinner katmani kurulu degilse EKLEMEZ', () => {
+    // Kullanici `--spinner` istemediyse zorla kurmayiz.
+    write({ theme: 'dark' })
+    new SpinnerSync({ path }).sync('Firecrawl')
+    expect(read().spinnerVerbs).toBeUndefined()
+  })
+
+  it('kullanicinin diger ayarlarini korur', () => {
+    write({ theme: 'dark', model: 'opus', spinnerVerbs: ours, hooks: { Stop: [] } })
+    new SpinnerSync({ path }).sync('Neon')
+    const s = read()
+    expect(s.theme).toBe('dark')
+    expect(s.model).toBe('opus')
+    expect(s.hooks).toEqual({ Stop: [] })
+  })
+})
+
+describe('dayaniklilik', () => {
+  it('bozuk settings.json daemon\'i dusurmez', () => {
+    writeFileSync(path, '{ bozuk')
+    const errors: unknown[] = []
+    expect(() => new SpinnerSync({ path, onError: (e) => errors.push(e) }).sync('X')).not.toThrow()
+    expect(errors).toHaveLength(1)
+    expect(readFileSync(path, 'utf8'), 'dosya bozulmamali').toBe('{ bozuk')
+  })
+
+  it('dosya yoksa sessizce gecer', () => {
+    expect(() => new SpinnerSync({ path: join(dir, 'yok.json') }).sync('X')).not.toThrow()
+  })
+
+  it('gecici dosya geride birakilmaz', () => {
+    write({ spinnerVerbs: ours })
+    new SpinnerSync({ path }).sync('Firecrawl')
+    expect(readdirSync(dir).filter((f) => f.includes('tmp'))).toHaveLength(0)
+  })
+})
+
+describe('cok oturum — spinner GLOBAL bir ayardir', () => {
+  it('bostaki oturumun tick\'i calisan oturumun reklamini SILMEZ', async () => {
+    // Gercek kurulumda cikan hata buydu: spinnerVerbs tek dosyada, tum
+    // oturumlar icin ortak. Karar isteği yapan oturuma gore verilince
+    // bostaki oturum listeyi bosaltiyor, Claude Code varsayilanlara donuyor
+    // ve kullanici spinner'da "Brewing…" goruyordu.
+    const { startDaemon } = await import('../src/daemon/index.js')
+    const { mkdtempSync: mk } = await import('node:fs')
+    const tmp = mk(join(tmpdir(), 'linger-multi-'))
+    const settings = join(tmp, 'settings.json')
+    writeFileSync(settings, JSON.stringify({ spinnerVerbs: ours }))
+
+    const d = await startDaemon({
+      socketPath: join(tmp, 'd.sock'),
+      dataDir: tmp,
+      settingsPath: settings,
+      syncSpinner: true,
+      ads: [{ campaignId: 'c1', nonce: '0'.repeat(32), nonceExpiresAt: 9e12,
+        creative: { brand: 'Firecrawl', text: 'metin' } }],
+    })
+
+    d.hook('UserPromptSubmit', 'calisan')
+    d.tick('calisan')
+    expect(JSON.parse(readFileSync(settings, 'utf8')).spinnerVerbs.verbs).toEqual(['✶ Firecrawl'])
+
+    d.tick('bosta')          // bostaki oturum tick atiyor
+    expect(
+      JSON.parse(readFileSync(settings, 'utf8')).spinnerVerbs.verbs,
+      'bostaki oturum reklami silmemeli',
+    ).toEqual(['✶ Firecrawl'])
+
+    await d.stop()
+    rmSync(tmp, { recursive: true, force: true })
+  })
+})
+
+describe('tur basina rotasyon — yalnizca tur bitiminde yazilir', () => {
+  async function daemonWith(settings: string) {
+    const { startDaemon } = await import('../src/daemon/index.js')
+    const { mkdtempSync: mk } = await import('node:fs')
+    const tmp = mk(join(tmpdir(), 'linger-turn-'))
+    writeFileSync(settings, JSON.stringify({ spinnerVerbs: ours }))
+    const ad = (b: string) => ({ campaignId: b, nonce: '0'.repeat(32), nonceExpiresAt: 9e12,
+      creative: { brand: b, text: 'metin' } })
+    const d = await startDaemon({
+      socketPath: join(tmp, 'd.sock'), dataDir: tmp, settingsPath: settings, syncSpinner: true,
+      ads: [ad('Bir'), ad('Iki'), ad('Uc')],
+    })
+    return { d, tmp }
+  }
+
+  it('tur ICINDE spinner sabit kalir — dosya ekranda gorunenle ayni', () => {
+    // Tur icinde yazmak o turu etkilemez (CC tur basinda okuyor) ama dosyayi
+    // ekrandan farkli hale getirir ve hata ayiklamayi yaniltir.
+    const dir2 = mkdtempSync(join(tmpdir(), 'linger-t1-'))
+    const set = join(dir2, 'settings.json')
+    return daemonWith(set).then(async ({ d, tmp }) => {
+      const read = () => JSON.parse(readFileSync(set, 'utf8')).spinnerVerbs.verbs[0]
+      d.hook('UserPromptSubmit', 's1')
+      const basta = read()
+      d.tick('s1'); d.tick('s1'); d.tick('s1')
+      expect(read(), 'tur icinde degismemeli').toBe(basta)
+      await d.stop()
+      rmSync(tmp, { recursive: true, force: true }); rmSync(dir2, { recursive: true, force: true })
+    })
+  })
+
+  it('tur BITINCE siradaki reklam on yuklenir', async () => {
+    const dir2 = mkdtempSync(join(tmpdir(), 'linger-t2-'))
+    const set = join(dir2, 'settings.json')
+    const { d, tmp } = await daemonWith(set)
+    const read = () => JSON.parse(readFileSync(set, 'utf8')).spinnerVerbs.verbs[0]
+
+    d.hook('UserPromptSubmit', 's1')
+    d.tick('s1')
+    const tur1 = read()
+
+    d.hook('Stop', 's1')
+    expect(read(), 'Stop siradakini yazmali').not.toBe(tur1)
+
+    // Tolerans boyunca gelen tick'ler on yuklemeyi EZMEMELI.
+    d.tick('s1'); d.tick('s1')
+    expect(read(), 'tick on yuklemeyi ezmemeli').not.toBe(tur1)
+
+    await d.stop()
+    rmSync(tmp, { recursive: true, force: true }); rmSync(dir2, { recursive: true, force: true })
+  })
+
+  it('daemon acilirken ilk reklami yazar — ilk tur yer tutucu gormez', async () => {
+    const dir2 = mkdtempSync(join(tmpdir(), 'linger-t3-'))
+    const set = join(dir2, 'settings.json')
+    const { d, tmp } = await daemonWith(set)
+    expect(JSON.parse(readFileSync(set, 'utf8')).spinnerVerbs.verbs[0]).toBe('✶ Bir')
+    await d.stop()
+    rmSync(tmp, { recursive: true, force: true }); rmSync(dir2, { recursive: true, force: true })
+  })
+})
+
+/**
+ * Daemon DURDURULUNCA spinner listesi bosalmamali.
+ *
+ * Gercekte yasandi: `stop()` icinde `spinner.clear()` cagriliyordu, yani
+ * her `linger restart`, her makine kapanisi ve her SIGTERM listeyi
+ * bosaltiyordu. `clear()` kendi aciklamasinda "yalnizca uninstall cagirir"
+ * dedigi halde.
+ *
+ * Zarari dolayli ve o yuzden gorunmezdi: liste bosken acilan bir Claude
+ * Code oturumu varsayilan kelimelere duser ve deger canli okunmadigi icin
+ * O OTURUM BOYUNCA oyle kalir. Bir yeniden baslatma, sonraki oturumun
+ * tamaminda reklami susturuyordu.
+ */
+describe('daemon durunca spinner', () => {
+  it('stop() listeyi BOSALTMAZ', async () => {
+    const { startDaemon } = await import('../src/daemon/index.js')
+    write({
+      statusLine: { type: 'command', command: 'x' },
+      spinnerVerbs: { mode: 'replace', verbs: ['✶ Marka'], [MARKER]: true },
+    })
+    const dizin = mkdtempSync(join(tmpdir(), 'linger-stop-'))
+
+    const d = await startDaemon({
+      dataDir: dizin,
+      socketPath: join(dizin, 's.sock'),
+      syncSpinner: true,
+      settingsPath: path,
+    })
+    await d.stop()
+
+    expect(read().spinnerVerbs?.verbs).toEqual(['✶ Marka'])   // dokunulmadi
+    rmSync(dizin, { recursive: true, force: true })
+  })
+
+  it('kaldirma yolu alani zaten siliyor — clear() gereksiz', async () => {
+    const { uninstall } = await import('../src/settings.js')
+    write({
+      statusLine: { type: 'command', command: 'x', [MARKER]: true },
+      spinnerVerbs: { mode: 'replace', verbs: ['✶ Marka'], [MARKER]: true },
+    })
+    uninstall(path)
+    expect(read().spinnerVerbs).toBeUndefined()
+  })
+})

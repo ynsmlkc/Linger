@@ -1,0 +1,738 @@
+/**
+ * HTTP katmani — §6.3.
+ *
+ * Ince tutuluyor: dogrulama, yetki, sekil donusumu. Butun karar mantigi
+ * `Pipeline` ve `Ledger`'da; buraya is kurali sizarsa test edilemez hale
+ * gelir.
+ *
+ * Uyumluluk (ADR-016): `v1` icinde semalar yalnizca ADDITIVE degisir.
+ * Istemci bilinmeyen alanlari yok sayar, sunucu fazlalik alanlari strip eder.
+ */
+
+import { Hono } from 'hono'
+import { createHash } from 'node:crypto'
+import {
+  impressionBatchSchema, remoteConfigSchema, PROTOCOL_HEADER, PROTOCOL_VERSION,
+  ERROR_CODES, type ErrorCode, type RemoteConfig, type TokenScope,
+  micros, type Micros,
+} from '@linger/protocol'
+import type { Clock, IdGenerator } from '@linger/protocol'
+import type { Pipeline } from '../pipeline.js'
+import type { Ledger } from '../ledger/ledger.js'
+import { accountId, PLATFORM_REVENUE } from '../ledger/accounts.js'
+import { bearerToken, type AuthContext, type TokenLookup } from './auth.js'
+import type { WalletAuth } from './wallet-auth.js'
+import type { PayoutStore } from '../payouts/store.js'
+import type { CampaignStore } from '../ads/campaign-store.js'
+import { compareVersions } from '../impressions/ingest.js'
+import { validateProfile, type ProfileStore, type Profile } from '../leaderboard/profiles.js'
+import { PERIODS, type Leaderboard, type Period } from '../leaderboard/leaderboard.js'
+import type { PoolStore, Pool } from '../pools/pool-store.js'
+import { countryFromRequest, type CountryLookup } from '../leaderboard/geo.js'
+import { poolReserve, poolSpent } from '../pools/reserve.js'
+import { COUNTRY_CODES } from '../leaderboard/countries.js'
+import { RateLimiter } from './rate-limit.js'
+
+export interface AppDeps {
+  readonly clock: Clock
+  readonly ids: IdGenerator
+  readonly pipeline: Pipeline
+  readonly ledger: Ledger
+  readonly tokens: TokenLookup
+  readonly config: () => RemoteConfig
+  /** IP'yi hash'lemek icin yerel tuz. Ham IP ASLA saklanmaz (§10). */
+  readonly ipSalt: string
+  readonly payoutThreshold: Micros
+  readonly explorerBase?: string
+  /** Odeme gecmisi. Verilmezse `recentPayouts` bos doner. */
+  readonly payouts?: PayoutStore
+  /** Reklamveren tarafi. Verilmezse `/v1/advertiser/*` uclari acilmaz. */
+  readonly campaigns?: CampaignStore
+  /** Sicak cuzdan adresi — reklamveren parayi buraya gonderir. */
+  readonly depositAddress?: string
+  /** Hangi Solana agi: `devnet` veya `mainnet`. */
+  readonly network?: 'devnet' | 'mainnet'
+  /** Odeme ve yatirmalarda kullanilan USDC mint adresi. */
+  readonly usdcMint?: string
+  /** Cuzdanla giris. Verilmezse `/v1/auth/*` uclari acilmaz. */
+  readonly walletAuth?: WalletAuth
+  /** Reklamverenin harcamadigi butceyi geri cekmesi. */
+  readonly withdraw?: import('../payouts/withdraw.js').WithdrawService
+  /** Yayincinin istege bagli cekimi — verilmezse `/v1/publisher/withdraw` kapali. */
+  readonly publisherWithdraw?: import('../payouts/withdraw.js').WithdrawService
+  /**
+   * Platformun kendi payinin cekimi (`kind: 'platform_revenue'`) —
+   * verilmezse `/v1/admin/*` uclari kapali.
+   *
+   * Denetimde bulundu: platform payi her gosterimde `PLATFORM_REVENUE`'ye
+   * yaziliyordu ama onu okuyan/ceken tek bir satir kod yoktu.
+   */
+  readonly platformWithdraw?: import('../payouts/withdraw.js').WithdrawService
+  /**
+   * `/v1/admin/*` icin paylasilan sir — cuzdan tabanli giris akisina
+   * girmiyor, cunku ortada "platform admin cuzdani" diye bir kimlik
+   * kavrami yok. Verilmezse `/v1/admin/*` uclari 404 doner.
+   */
+  readonly adminSecret?: string
+  /** Yayinci profilleri. Verilmezse `/v1/me/profile` ve `/v1/leaderboard*` kapali. */
+  readonly profiles?: ProfileStore
+  readonly leaderboard?: Leaderboard
+  /** IP → ulke kodu (yerel veritabani). Yoksa yalnizca platform basliklarina bakilir. */
+  readonly countryLookup?: CountryLookup | null
+  /** Sponsor havuzlari (NEXT.md §10). `campaigns` da verilmezse uclar kapali. */
+  readonly pools?: PoolStore
+  /** `/v1/ads/next` hiz siniri. Verilmezse varsayilan kova (bkz. rate-limit.ts). */
+  readonly adRateLimit?: RateLimiter
+}
+
+type Vars = { auth: AuthContext }
+
+const err = (code: ErrorCode, hint?: string) => ({
+  code, message: ERROR_CODES[code], ...(hint ? { hint } : {}),
+})
+
+/** §10 — IP yalnizca hash'lenerek saklanir, ham hali hicbir yere yazilmaz. */
+const hashIp = (ip: string | undefined, salt: string): string | null =>
+  ip ? createHash('sha256').update(salt).update(ip).digest('hex').slice(0, 32) : null
+
+/** Kampanyanin disariya gorunen sekli. Ic alanlar sizmaz. */
+const toCampaignJson = (c: import('../ads/selector.js').Campaign) => ({
+  id: c.id,
+  brand: c.creative.brand,
+  text: c.creative.text,
+  cta: c.creative.cta,
+  bidCpmMicros: c.bidCpm.toString(),
+  status: c.status,
+  // Onizleme: reklamverenin gorecegi satir, kullanicinin gordugunun aynisi.
+  preview: `✶ ${c.creative.brand} — ${c.creative.text} · ${c.creative.cta ?? ''}`,
+  // NEXT.md §10 — havuz projesi mi. Panel bunlari normal kampanya listesinden ayiriyor.
+  poolId: c.poolId ?? null,
+})
+
+export function createApp(deps: AppDeps) {
+  const app = new Hono<{ Variables: Vars }>()
+  const adLimit = deps.adRateLimit ?? new RateLimiter({ now: () => deps.clock.now() })
+
+  app.use('*', async (c, next) => {
+    c.header(PROTOCOL_HEADER, PROTOCOL_VERSION)
+    await next()
+  })
+
+  /* ─────────────────── yetki ─────────────────── */
+
+  const requireScope = (...needed: TokenScope[]) =>
+    async (c: any, next: any) => {
+      const raw = bearerToken(c.req.header('authorization'))
+      if (!raw) return c.json(err('LNG_2001', '`linger login` calistir'), 401)
+
+      const rec = deps.tokens.find(raw)
+      if (!rec || rec.revokedAt !== null) {
+        return c.json(err('LNG_2002', 'Token iptal edilmis veya gecersiz'), 401)
+      }
+
+      // Kapsam kontrolu. Daemon token'i cuzdan degistiremez.
+      const missing = needed.filter((s) => !rec.scopes.includes(s))
+      if (missing.length > 0) {
+        return c.json(err('LNG_2003', `gerekli kapsam: ${missing.join(', ')}`), 403)
+      }
+
+      const version = c.req.header('x-linger-client-version') ?? null
+      deps.tokens.touch(rec.id, deps.clock.now(), version)
+      c.set('auth', { publisherId: rec.publisherId, tokenId: rec.id, scopes: rec.scopes })
+      await next()
+    }
+
+  /**
+   * ADR-016 — surum kapisi.
+   *
+   * Kill switch (ADR-008) toptan kapatir; bu SECICI kapatir. Olcum veya odeme
+   * protokolunde bir hata bulunursa yalnizca hatali surumleri devre disi
+   * birakabilmek gerekir.
+   */
+  const requireVersion = async (c: any, next: any) => {
+    const v = c.req.header('x-linger-client-version')
+    const min = deps.config().minClientVersion
+    if (v && compareVersions(v, min) < 0) {
+      return c.json(err('LNG_1005', `en az ${min} gerekli, guncelle: npm i -g linger`), 426)
+    }
+    await next()
+  }
+
+  /* ─────────────────── uclar ─────────────────── */
+
+  /**
+   * Remote config. Yetki İSTEMEZ — kill switch'in ulasabilmesi icin.
+   * Token'i bozulmus bir istemcinin de susturulabilmesi gerekiyor.
+   */
+  app.get('/v1/config', (c) => c.json(remoteConfigSchema.parse(deps.config())))
+
+  /**
+   * Saglik kontrolu — Railway ve benzeri platformlar bunu cagirir.
+   *
+   * Yetki ISTEMEZ ve istememeli: platformun elinde token yok. Icerde ne
+   * oldugunu da SIZDIRMAZ — kampanya sayisi, bakiye, kullanici sayisi gibi
+   * seyler kimlik dogrulamasi olmayan bir uctan disari cikmaz.
+   */
+  app.get('/health', (c) => c.json({ ok: true, version: PROTOCOL_VERSION }))
+
+  /* ─────────────────── cuzdanla giris ─────────────────── */
+
+  /**
+   * ADR-010 (revize) — kimlik cuzdandir.
+   *
+   * Bu iki uc YETKI ISTEMEZ; yetkinin kendisi burada uretiliyor. Guvenlik
+   * imzadan gelir: kullanici challenge'i yalnizca ozel anahtariyla
+   * imzalayabilir, biz de o anahtari hicbir zaman gormeyiz.
+   */
+  if (deps.walletAuth) {
+    const wa = deps.walletAuth
+
+    app.post('/v1/auth/challenge', async (c) => {
+      const body = await c.req.json().catch(() => null)
+      const address = typeof body?.address === 'string' ? body.address.trim() : ''
+
+      const r = wa.challenge(address)
+      if (!r.ok) return c.json(err('LNG_4001', r.reason), 400)
+
+      // `message`: cuzdana imzalatilacak OKUNABILIR metin (SIWS bicimi).
+      return c.json({ message: r.message, expiresAt: r.expiresAt })
+    })
+
+    app.post('/v1/auth/verify', async (c) => {
+      const body = await c.req.json().catch(() => null)
+      const address = typeof body?.address === 'string' ? body.address.trim() : ''
+      const message = typeof body?.message === 'string' ? body.message : ''
+      const signature = typeof body?.signature === 'string' ? body.signature : ''
+      if (!address || !message || !signature) {
+        return c.json(err('LNG_9001', '`address`, `message` ve `signature` (base64) gerekli'), 400)
+      }
+
+      // Rol token'in kapsamini belirliyor. Bilinmeyen deger yayinci sayilir
+      // — sessizce reklamveren yetkisi vermek yanlis tarafta hata olurdu.
+      const role = body?.role === 'advertiser' ? 'advertiser' : 'publisher'
+      const r = await wa.verify(address, message, signature, role)
+      // 401: imza gecerli degil. Bu bir sunucu hatasi degil, kimlik reddi.
+      if (!r.ok) return c.json(err('LNG_2002', r.detail ? `${r.reason}: ${r.detail}` : r.reason), 401)
+
+      // Ham token YALNIZCA burada gorunur. Tekrar okunamaz — kaybedilirse
+      // yeniden giris yapilir. Sunucuda yalnizca hash'i var.
+      return c.json({ token: r.token, tokenId: r.tokenId, publisherId: r.publisherId, role })
+    })
+  }
+
+  app.post('/v1/ads/next', requireVersion, requireScope('report:impressions'), (c) => {
+    const { publisherId } = c.get('auth')
+
+    if (!deps.config().renderEnabled) {
+      return c.json(err('LNG_3005'), 503)
+    }
+
+    // Nonce hizi = gosterim hizi (bkz. rate-limit.ts). Siniri asan istemci
+    // 429 alir; daemon bunu diger hatalar gibi sessizce karsilar.
+    const bekle = adLimit.take(publisherId)
+    if (bekle > 0) {
+      c.header('retry-after', String(Math.ceil(bekle / 1000)))
+      return c.json(err('LNG_9001', 'reklam isteme hizi siniri'), 429)
+    }
+
+    const sel = deps.pipeline.serveAd(publisherId)
+    // Kampanya yoksa 404 degil 204: bu bir hata degil, "su an gosterecek bir
+    // sey yok" durumu. Istemci sessizce hicbir sey basmaz.
+    if (!sel) return c.body(null, 204)
+
+    return c.json({
+      campaignId: sel.campaign.id,
+      nonce: sel.nonce,
+      nonceExpiresAt: sel.nonceExpiresAt,
+      creative: sel.campaign.creative,
+      // DIKKAT: `rate` BURADA YOK ve olmayacak (ADR-011). Fiyat sunucu
+      // tarafinda dondurulur; istemciye gondermek hem gereksiz hem
+      // manipulasyon yuzeyi.
+    })
+  })
+
+  app.post('/v1/impressions', requireVersion, requireScope('report:impressions'), async (c) => {
+    const { publisherId } = c.get('auth')
+
+    const body = await c.req.json().catch(() => null)
+    const parsed = impressionBatchSchema.safeParse(body)
+    if (!parsed.success) {
+      return c.json(err('LNG_9001', parsed.error.issues[0]?.message ?? 'gecersiz govde'), 400)
+    }
+
+    const ipHash = hashIp(
+      c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? c.req.header('x-real-ip'),
+      deps.ipSalt,
+    )
+
+    const result = deps.pipeline.ingest.ingest(publisherId, parsed.data.events, { ipHash })
+
+    // Kismi basari 200 doner: istemci hangi ID'lerin kabul edildigini bilir
+    // ve yalnizca onlari kuyrugundan siler. Toptan hata donmek, iyi kayitlari
+    // da yeniden gondermeye zorlardi.
+    return c.json({
+      accepted: result.accepted,
+      rejected: result.rejected.map((r) => ({ id: r.id, reason: r.reason })),
+      duplicates: result.duplicates,
+    })
+  })
+
+  app.get('/v1/me/balance', requireScope('read:balance'), (c) => {
+    const { publisherId } = c.get('auth')
+    const pubAcc = accountId('publisher', publisherId)
+    const payable = deps.ledger.balance(pubAcc)
+    // Yalnizca BU yayincinin yoldaki parasi. `payouts_in_flight` hesabinin
+    // kendisi herkesin toplami — onu donmek baskalarinin cekimlerini sizdirirdi.
+    const inFlight = deps.ledger.inFlightFrom(pubAcc)
+
+    // Bekleyen: henuz dogrulanmamis gosterimlerin degeri. Ledger'da YOK,
+    // cunku dogrulanana kadar para degil.
+    let pending = 0n
+    for (const i of deps.pipeline.impressions()) {
+      if (i.publisherId === publisherId && i.state === 'pending') {
+        pending += (BigInt(i.rateMicros) * BigInt(i.revShareBps)) / 10_000n
+      }
+    }
+
+    return c.json({
+      pendingMicros: pending.toString(),
+      payableMicros: payable.toString(),
+      inFlightMicros: inFlight.toString(),
+      // Kazanilan her sey — cekimden sonra DUSMEZ (eskiden `payable`'di).
+      lifetimeMicros: deps.ledger.earned(pubAcc).toString(),
+      // Su an cekilebilecek tutar — istege bagli cekim. Esigin altindaysa
+      // sifir: kullaniciya cekemeyecegi bir rakam gostermek, dugmeye basip
+      // hata almasina yol acardi (bkz. reklamveren tarafindaki ayni desen).
+      withdrawableMicros: (deps.publisherWithdraw?.available(publisherId) ?? 0n).toString(),
+      // Gecmis alan — artik yayinci istedigi an cekebiliyor, otomatik
+      // job'in esigi degil. Geriye donuk uyumluluk icin (ADR-016) kaldirilmadi.
+      payoutThresholdMicros: deps.payoutThreshold.toString(),
+      // Odeme gecmisi kayittan. "Param nerede" sorusunun cevabi burada:
+      // her kalem bir islem hash'i tasir, kullanici zincirde dogrulayabilir.
+      recentPayouts: (deps.payouts?.forPublisher(publisherId, 10) ?? []).map((p) => ({
+        txHash: p.txHash,
+        amountMicros: p.amount.toString(),
+        at: p.submittedAt,
+        state: p.state,
+        // Adres SNAPSHOT — o an nereye gonderildigi. Guncel cuzdan DEGIL.
+        destination: p.destinationAddress,
+      })),
+      // Odeme neden bloke — kullaniciya sebep gosterilmek zorunda (§6.5).
+      blockedReason: payable < deps.payoutThreshold
+        ? `threshold ${deps.payoutThreshold} micro, balance ${payable}`
+        : null,
+    })
+  })
+
+  /**
+   * Istege bagli cekim — yayinci artik otomatik job'i beklemek zorunda
+   * degil, `withdrawableMicros` kadar tutari istedigi an cekebilir.
+   *
+   * Reklamveren cekimiyle AYNI desen (`/v1/advertiser/withdraw`): hedef
+   * parametresi yok, para her zaman token sahibinin kendi adresine gider.
+   */
+  app.post('/v1/publisher/withdraw', requireScope('withdraw:balance'), async (c) => {
+    if (!deps.publisherWithdraw) return c.json(err('LNG_9001', 'cekim kapali'), 404)
+    const { publisherId } = c.get('auth')
+
+    const body = await c.req.json().catch(() => null)
+    const raw = typeof body?.amountMicros === 'string' ? body.amountMicros : null
+    if (raw === null || !/^\d+$/.test(raw)) {
+      return c.json(err('LNG_9001', '`amountMicros` tam sayi metni olmali'), 400)
+    }
+
+    const r = await deps.publisherWithdraw.withdraw(publisherId, micros(BigInt(raw)))
+    if (!r.ok) {
+      // 409 = "su an olmaz, sonra olabilir". 400 = "boyle olmaz".
+      return c.json(err('LNG_9001', r.reason), r.retryable ? 409 : 400)
+    }
+    return c.json({ txHash: r.txHash, amountMicros: r.amount.toString() })
+  })
+
+  /* ─────────────────── reklamveren ─────────────────── */
+
+  /**
+   * Reklamveren de CUZDANLA giris yapiyor — yayincilarla ayni imza akisi,
+   * farkli kapsamlar. `advertiserId` adresin kendisi (ADR-010).
+   *
+   * Kapsam ayrimi onemli: calinmis bir daemon token'i kampanya olusturup
+   * baskasinin butcesini harcayamaz.
+   */
+  if (deps.campaigns) {
+    const store = deps.campaigns
+
+    /** Reklamverenin ozeti: bakiye, para yatirma bilgisi, kampanyalar. */
+    app.get('/v1/advertiser/me', requireScope('read:spend'), (c) => {
+      const { publisherId: advertiserId } = c.get('auth')
+      const bakiye = deps.ledger.balance(accountId('advertiser', advertiserId))
+
+      return c.json({
+        advertiserId,
+        balanceMicros: bakiye.toString(),
+        // Rezerve: teslim edilmis ama henuz raporlanmamis reklamlar + bekleyen
+        // gosterimler. Reklamveren "param var ama harcayamiyorum" dedigi anda
+        // cevabi bu.
+        spendableMicros: deps.pipeline.spendable(advertiserId).toString(),
+        deposit: deps.depositAddress
+          ? {
+              address: deps.depositAddress,
+              asset: 'USDC',
+              network: deps.network ?? 'devnet',
+              usdcMint: deps.usdcMint ?? null,
+              // KRITIK: para KENDI cuzdanindan gelmeli. Eslesme gonderen
+              // adrese gore yapiliyor; borsadan gonderilen para sahipsiz kalir.
+              note: `Yalnizca ${advertiserId} adresinden gonderilen odemeler hesabina yazilir`,
+            }
+          : null,
+        // Su an cekilebilecek tutar. `spendable` ile ayni ama esigin
+        // altindaysa sifir: kullaniciya cekilemeyecek bir rakam gostermek,
+        // dugmeye basip hata almasina yol acardi.
+        withdrawableMicros: (deps.withdraw?.available(advertiserId) ?? 0n).toString(),
+        // NEXT.md §10 — acik havuzlara ayrilan, cekilemeyen kisim.
+        ...(deps.pools ? { reservedForPoolsMicros: poolReserve({
+          pools: deps.pools, campaigns: store, spentOn: (ids) => deps.pipeline.spentOn(ids),
+        }, advertiserId).toString() } : {}),
+        campaigns: store.forAdvertiser(advertiserId).map(toCampaignJson),
+      })
+    })
+
+    app.post('/v1/advertiser/campaigns', requireScope('manage:campaigns'), async (c) => {
+      const { publisherId: advertiserId } = c.get('auth')
+      const body = await c.req.json().catch(() => null)
+
+      const bid = typeof body?.bidCpmMicros === 'string' ? body.bidCpmMicros : null
+      if (bid === null || !/^\d+$/.test(bid)) {
+        return c.json(err('LNG_9001', '`bidCpmMicros` tam sayi metni olmali'), 400)
+      }
+
+      const r = store.create({
+        advertiserId,
+        brand: String(body?.brand ?? ''),
+        text: String(body?.text ?? ''),
+        cta: String(body?.cta ?? ''),
+        bidCpm: micros(BigInt(bid)),
+      })
+      // Red sebebi ALANIYLA birlikte donuyor: form hangi kutuyu
+      // kirmizi yapacagini bilsin.
+      if (!r.ok) return c.json({ ...err('LNG_9001', r.reason), field: r.field }, 400)
+
+      return c.json(toCampaignJson(r.campaign), 201)
+    })
+
+    /**
+     * Harcanmamis butceyi geri cek.
+     *
+     * Hedef parametresi YOK: para reklamverenin kendi adresine gider.
+     * Kimlik zaten cuzdan (ADR-010), baska bir hedef kabul etmek kimlik
+     * dogrulamasini anlamsiz kilardi.
+     */
+    app.post('/v1/advertiser/withdraw', requireScope('manage:campaigns'), async (c) => {
+      if (!deps.withdraw) return c.json(err('LNG_9001', 'cekim kapali'), 404)
+      const { publisherId: advertiserId } = c.get('auth')
+
+      const body = await c.req.json().catch(() => null)
+      const raw = typeof body?.amountMicros === 'string' ? body.amountMicros : null
+      if (raw === null || !/^\d+$/.test(raw)) {
+        return c.json(err('LNG_9001', '`amountMicros` tam sayi metni olmali'), 400)
+      }
+
+      const r = await deps.withdraw.withdraw(advertiserId, micros(BigInt(raw)))
+      if (!r.ok) {
+        // 409 = "su an olmaz, sonra olabilir". 400 = "boyle olmaz".
+        return c.json(err('LNG_9001', r.reason), r.retryable ? 409 : 400)
+      }
+      return c.json({ txHash: r.txHash, amountMicros: r.amount.toString() })
+    })
+
+    app.post('/v1/advertiser/campaigns/:id/status', requireScope('manage:campaigns'), async (c) => {
+      const { publisherId: advertiserId } = c.get('auth')
+      const body = await c.req.json().catch(() => null)
+      const durum = body?.status
+
+      if (durum !== 'active' && durum !== 'paused') {
+        return c.json(err('LNG_9001', '`status` yalnizca active veya paused olabilir'), 400)
+      }
+
+      // Yayina almadan once para kontrolu. Bos butceyle "aktif" gorunen bir
+      // kampanya, reklamvereni hicbir sey olmadigini anlamadan bekletir.
+      if (durum === 'active') {
+        const spendable = deps.pipeline.spendable(advertiserId)
+        if (spendable <= 0n) {
+          return c.json(err('LNG_3004', 'bakiye yok — once para yatir'), 402)
+        }
+      }
+
+      const r = store.setStatus(c.req.param('id'), advertiserId, durum)
+      if (!r.ok) return c.json(err('LNG_9001', r.reason), 404)
+      return c.json(toCampaignJson(r.campaign))
+    })
+  }
+
+  /* ─────────────────── profil ve siralama ─────────────────── */
+
+  if (deps.profiles && deps.leaderboard) {
+    const profiles = deps.profiles
+    const board = deps.leaderboard
+
+    const toProfileJson = (p: Profile | null) =>
+      p ? { nickname: p.nickname, country: p.country, listed: p.listed } : null
+
+    /**
+     * Kendi profilini okuma/yazma. Ayri bir kapsam YOK: yayincinin her
+     * token'inda `read:balance` var ve yeni bir kapsam, mevcut herkesi
+     * yeniden giris yapmaya zorlardi. Calinmis bir token'in yapabilecegi en
+     * kotu sey takma adi degistirmek — para yolu degil.
+     */
+    app.get('/v1/me/profile', requireScope('read:balance'), (c) => {
+      const profile = profiles.get(c.get('auth').publisherId)
+      // CCgather yaklasimi: ulke yalnizca HENUZ SECILMEMISSE tahmin edilir ve
+      // yalnizca formu onceden doldurur — kullanici onaylamadan hicbir yere
+      // yazilmaz, sectigi ulkenin ustune de asla yazilmaz.
+      const suggestedCountry = profile?.country
+        ? null
+        : countryFromRequest((n) => c.req.header(n), deps.countryLookup ?? null)
+      return c.json({ profile: toProfileJson(profile), suggestedCountry })
+    })
+
+    app.put('/v1/me/profile', requireScope('read:balance'), async (c) => {
+      const v = validateProfile(await c.req.json().catch(() => null))
+      if (!v.ok) return c.json(err('LNG_9001', v.reason), 400)
+      const r = profiles.set(c.get('auth').publisherId, v.value, deps.clock.now())
+      // 409: takma ad baskasinda — istek gecerli ama su an olmaz.
+      if (!r.ok) return c.json(err('LNG_9001', r.reason), 409)
+      return c.json({ profile: toProfileJson(r.profile) })
+    })
+
+    /**
+     * Genel uclar — yetki ISTEMEZ, ana sayfa bunlari cagiriyor.
+     *
+     * `/health`'in "kullanici sayisi sizdirmaz" kurali burada da gecerli:
+     * yalnizca `listed` profiller sayiliyor, yani buradan cikan her bilgi
+     * sahibinin acikca yayinlamayi sectigi bilgi.
+     */
+    const period = (raw: string | undefined): Period =>
+      (PERIODS as readonly string[]).includes(raw ?? '') ? raw as Period : 'all'
+
+    app.get('/v1/leaderboard', (c) => {
+      const country = c.req.query('country')?.toUpperCase() ?? null
+      const limit = Math.min(Math.max(Number(c.req.query('limit')) || 50, 1), 100)
+      c.header('cache-control', 'public, max-age=30')
+      // Bilinmeyen kod kimsenin secemeyecegi bir ulke: bos liste, genel
+      // siralamaya dusmek degil.
+      if (country !== null && !COUNTRY_CODES.has(country)) return c.json({ rows: [] })
+      return c.json({ rows: board.top(period(c.req.query('period')), country, limit) })
+    })
+
+    app.get('/v1/leaderboard/countries', (c) => {
+      c.header('cache-control', 'public, max-age=30')
+      return c.json({ countries: board.countries() })
+    })
+
+    app.get('/v1/leaderboard/profile/:nickname', (c) => {
+      const d = board.profile(c.req.param('nickname'), period(c.req.query('period')))
+      if (!d) return c.json(err('LNG_9001', 'no such listed profile'), 404)
+      c.header('cache-control', 'public, max-age=30')
+      return c.json(d)
+    })
+  }
+
+  /* ─────────────────── sponsor havuzlari ─────────────────── */
+
+  /**
+   * NEXT.md §10. Para sponsorun reklamveren hesabinda; havuz projeleri onun
+   * adina faturalaniyor. Bu yuzden sponsor uclari reklamveren kapsamini,
+   * katilimci uclari yayinci kapsamini istiyor — calinmis bir daemon token'i
+   * havuz acamaz, bir reklamveren token'i da baskasi adina havuza katilamaz.
+   */
+  if (deps.pools && deps.campaigns) {
+    const pools = deps.pools
+    const store = deps.campaigns
+
+    const reserveDeps = { pools, campaigns: store, spentOn: (ids: ReadonlySet<string>) => deps.pipeline.spentOn(ids) }
+    const poolJson = (p: Pool) => ({
+      id: p.id, name: p.name, code: p.code, status: p.status,
+      bidCpmMicros: p.bidCpm.toString(), budgetMicros: p.budget.toString(),
+      spentMicros: poolSpent(reserveDeps, p).toString(), dailyCapPerMember: p.dailyCapPerMember,
+      createdAt: p.createdAt, closedAt: p.closedAt,
+    })
+    const intText = (v: unknown) => (typeof v === 'string' && /^\d+$/.test(v) ? BigInt(v) : null)
+
+    app.post('/v1/advertiser/pools', requireScope('manage:campaigns'), async (c) => {
+      const body = await c.req.json().catch(() => null)
+      const bid = intText(body?.bidCpmMicros)
+      const budget = intText(body?.budgetMicros)
+      if (bid === null || budget === null) {
+        return c.json(err('LNG_9001', '`bidCpmMicros` ve `budgetMicros` tam sayi metni olmali'), 400)
+      }
+      const r = pools.create({
+        sponsorId: c.get('auth').publisherId,
+        name: typeof body?.name === 'string' ? body.name : '',
+        bidCpm: micros(bid),
+        budget: micros(budget),
+        ...(body?.dailyCapPerMember !== undefined ? { dailyCapPerMember: Number(body.dailyCapPerMember) } : {}),
+      })
+      if (!r.ok) return c.json(err('LNG_9001', r.reason), 400)
+      return c.json(poolJson(r.pool), 201)
+    })
+
+    app.get('/v1/advertiser/pools', requireScope('manage:campaigns'), (c) => {
+      const sponsorId = c.get('auth').publisherId
+      return c.json({
+        spendableMicros: deps.pipeline.spendable(sponsorId).toString(),
+        // Acik havuzlara ayrilmis, henuz harcanmamis tutar — cekilemez.
+        reservedForPoolsMicros: poolReserve(reserveDeps, sponsorId).toString(),
+        pools: pools.forSponsor(sponsorId).map((p) => ({
+          ...poolJson(p),
+          members: pools.memberCount(p.id),
+          // Katilimcinin adresi sponsora da gosterilmiyor; yalnizca satir.
+          projects: store.forPool(p.id).map(toCampaignJson),
+        })),
+      })
+    })
+
+    app.post('/v1/advertiser/pools/:id/budget', requireScope('manage:campaigns'), async (c) => {
+      const budget = intText((await c.req.json().catch(() => null))?.budgetMicros)
+      if (budget === null) return c.json(err('LNG_9001', '`budgetMicros` tam sayi metni olmali'), 400)
+      const r = pools.setBudget(c.req.param('id'), c.get('auth').publisherId, micros(budget))
+      if (!r.ok) return c.json(err('LNG_9001', r.reason), r.reason === 'pool not found' ? 404 : 409)
+      return c.json(poolJson(r.pool))
+    })
+
+    app.post('/v1/advertiser/pools/:id/close', requireScope('manage:campaigns'), (c) => {
+      const r = pools.close(c.req.param('id'), c.get('auth').publisherId)
+      if (!r.ok) return c.json(err('LNG_9001', r.reason), 404)
+      return c.json(poolJson(r.pool))
+    })
+
+    const myProject = (publisherId: string, poolId: string) =>
+      store.forPool(poolId).find((x) => x.submittedBy === publisherId) ?? null
+
+    app.get('/v1/me/pool', requireScope('read:balance'), (c) => {
+      const me = c.get('auth').publisherId
+      const p = pools.membership(me)
+      const project = p ? myProject(me, p.id) : null
+      return c.json({
+        pool: p ? { name: p.name, code: p.code, status: p.status, members: pools.memberCount(p.id) } : null,
+        project: project ? toCampaignJson(project) : null,
+      })
+    })
+
+    app.post('/v1/me/pool/join', requireScope('read:balance'), async (c) => {
+      const body = await c.req.json().catch(() => null)
+      const r = pools.join(typeof body?.code === 'string' ? body.code : '', c.get('auth').publisherId)
+      if (!r.ok) return c.json(err('LNG_9001', r.reason), 404)
+      return c.json({ name: r.pool.name, code: r.pool.code })
+    })
+
+    app.post('/v1/me/pool/leave', requireScope('read:balance'), (c) => {
+      pools.leave(c.get('auth').publisherId)
+      return c.json({ ok: true })
+    })
+
+    app.post('/v1/me/pool/project', requireScope('read:balance'), async (c) => {
+      const me = c.get('auth').publisherId
+      const p = pools.membership(me)
+      if (!p || p.status !== 'open') return c.json(err('LNG_9001', 'join an open pool first'), 409)
+      // Takim basina tek proje: kapali grupta satir sayisini sisirip
+      // dongudeki payini buyutmek bedava olmasin.
+      if (myProject(me, p.id)) return c.json(err('LNG_9001', 'you already submitted a project to this pool'), 409)
+
+      const body = await c.req.json().catch(() => null)
+      const r = store.createPoolProject({
+        sponsorId: p.sponsorId, poolId: p.id, submittedBy: me, bidCpm: p.bidCpm,
+        brand: typeof body?.brand === 'string' ? body.brand : '',
+        text: typeof body?.text === 'string' ? body.text : '',
+        cta: typeof body?.cta === 'string' ? body.cta : '',
+      })
+      if (!r.ok) return c.json(err('LNG_9001', r.reason), 400)
+      return c.json(toCampaignJson(r.campaign), 201)
+    })
+
+    /** Genel ozet — hackathon sayfasinda paylasilabilsin. Para ve adres yok. */
+    app.get('/v1/pools/:code', (c) => {
+      const p = pools.byCode(c.req.param('code'))
+      if (!p) return c.json(err('LNG_9001', 'no such pool'), 404)
+      const projects = store.forPool(p.id).filter((x) => x.status === 'active')
+      return c.json({
+        name: p.name, status: p.status, members: pools.memberCount(p.id),
+        projects: projects.map((x) => ({ brand: x.creative.brand, text: x.creative.text, cta: x.creative.cta })),
+      })
+    })
+  }
+
+  /* ─────────────────── admin ─────────────────── */
+
+  /**
+   * Cuzdan tabanli giris akisina girmiyor — ortada "admin cuzdani" diye
+   * bir kimlik kavrami yok. Paylasilan bir sirla korunuyor, tipki
+   * `LINGER_HOT_SECRET` gibi. `adminSecret` verilmezse uc hic acilmaz.
+   */
+  if (deps.adminSecret) {
+    const requireAdmin = async (c: any, next: any) => {
+      const raw = bearerToken(c.req.header('authorization'))
+      // Sabit-zamanli olmayan karsilastirma burada kabul edilebilir: bu
+      // sir zaten yalnizca bir kisi (platform operatoru) tarafindan
+      // kullaniliyor, kamuya acik bir giris denemesi yuzeyi degil.
+      if (!raw || raw !== deps.adminSecret) {
+        return c.json(err('LNG_2002', 'gecersiz admin sirri'), 401)
+      }
+      await next()
+    }
+
+    /** Platformun goremedigi seyler burada: bkz. denetim notu. */
+    app.get('/v1/admin/overview', requireAdmin, (c) => {
+      const campaigns = deps.campaigns?.all() ?? []
+      const imps = deps.pipeline.impressions()
+      const verified = imps.filter((i) => i.state === 'verified')
+      const pending = imps.filter((i) => i.state === 'pending')
+      const rejected = imps.filter((i) => i.state === 'rejected')
+
+      return c.json({
+        platformRevenueMicros: deps.ledger.balance(PLATFORM_REVENUE).toString(),
+        withdrawableMicros: (deps.platformWithdraw?.available('platform') ?? 0n).toString(),
+        impressions: {
+          verified: verified.length,
+          pending: pending.length,
+          rejected: rejected.length,
+        },
+        campaigns: campaigns.map((c2) => ({
+          ...toCampaignJson(c2),
+          advertiserId: c2.advertiserId,
+          frequencyCap: c2.frequencyCap,
+          dailyBudgetMicros: c2.dailyBudgetMicros?.toString() ?? null,
+          // "Neden bu kampanya hic servis edilmiyor" sorusunun cevabi cogu
+          // zaman burada: ADR-021 bakiyesi sifir/eksi olan kampanyayi
+          // AdSelector'da sessizce eliyor, durumu "active" gorunse bile.
+          spendableMicros: deps.pipeline.spendable(c2.advertiserId).toString(),
+        })),
+      })
+    })
+
+    app.post('/v1/admin/withdraw', requireAdmin, async (c) => {
+      if (!deps.platformWithdraw) return c.json(err('LNG_9001', 'cekim kapali'), 404)
+      const body = await c.req.json().catch(() => null)
+      const raw = typeof body?.amountMicros === 'string' ? body.amountMicros : null
+      const to = typeof body?.destination === 'string' ? body.destination : null
+      if (raw === null || !/^\d+$/.test(raw)) {
+        return c.json(err('LNG_9001', '`amountMicros` tam sayi metni olmali'), 400)
+      }
+      if (!to) {
+        return c.json(err('LNG_9001', '`destination` (platformun kendi cuzdan adresi) sart'), 400)
+      }
+
+      const r = await deps.platformWithdraw.withdraw(to, micros(BigInt(raw)))
+      if (!r.ok) return c.json(err('LNG_9001', r.reason), r.retryable ? 409 : 400)
+      return c.json({ txHash: r.txHash, amountMicros: r.amount.toString() })
+    })
+  }
+
+  app.notFound((c) => c.json(err('LNG_9001', 'bilinmeyen uc'), 404))
+
+  app.onError((e, c) => {
+    // Stack trace ASLA disari cikmaz — istemciye kod ve tek cumle gider.
+    console.error('[linger]', e)
+    return c.json(err('LNG_9001'), 500)
+  })
+
+  return app
+}

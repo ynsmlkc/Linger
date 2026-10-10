@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your earnings — Linger</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='28' fill='%23f97335'>✶</text></svg>">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<header class="top">
+  <a class="brand" href="/"><span class="star">✶</span>linger</a>
+  <nav class="nav">
+    <a href="/">for developers</a>
+    <a href="/advertisers">advertisers</a>
+    <span class="chip hidden" id="who"><span class="dot"></span><span id="who-addr"></span></span>
+    <button class="btn btn-sm btn-quiet hidden" id="signout">sign out</button>
+  </nav>
+</header>
+
+<main class="wrap" style="padding-top: clamp(32px, 5vw, 60px); padding-bottom: 96px">
+
+  <!-- ═══ bagli degil ═══ -->
+  <div id="v-connect" class="card hidden" style="max-width: 460px; margin: clamp(20px, 8vw, 90px) auto 0">
+    <h1 style="font-size: clamp(24px, 3vw, 32px); margin-bottom: 12px">Connect your wallet</h1>
+    <p class="body" style="margin: 0 0 26px">This is the wallet you will be paid into. There is no account and no password — your address is your identity.</p>
+
+    <div class="note note-accent hidden" id="no-wallet" style="margin-bottom: 18px">
+      No Solana wallet found in this browser.
+      Install <a href="https://phantom.app" target="_blank" rel="noopener" style="color: var(--accent)">Phantom</a>, <a href="https://solflare.com" target="_blank" rel="noopener" style="color: var(--accent)">Solflare</a> or <a href="https://backpack.app" target="_blank" rel="noopener" style="color: var(--accent)">Backpack</a>, then reload this page.
+    </div>
+
+    <button class="btn btn-primary" id="connect" style="width: 100%">
+      <span class="spinner hidden" id="connect-spin"></span><span id="connect-label">Connect wallet</span>
+    </button>
+
+    <div class="note note-warn hidden" id="connect-error" style="margin-top: 18px">
+      <p style="margin: 0 0 10px" id="connect-error-text"></p>
+      <button class="btn btn-sm btn-quiet" id="retry-connect">Try again</button>
+    </div>
+
+    <p class="small" style="margin: 22px 0 0">You sign a message to prove the address is yours. It cannot be submitted to the network and it moves nothing. Your private key never leaves your wallet.</p>
+  </div>
+
+  <!-- ═══ yukleniyor ═══ -->
+  <div id="v-loading" class="hidden" style="display: grid; gap: 18px; max-width: 640px">
+    <div style="height: 64px; border-radius: 4px; background: rgba(236,231,225,0.045)"></div>
+    <div style="height: 40px; border-radius: 4px; background: rgba(236,231,225,0.045)"></div>
+    <div style="height: 40px; border-radius: 4px; background: rgba(236,231,225,0.045)"></div>
+    <p class="small" style="margin: 0">Loading your balance…</p>
+  </div>
+
+  <!-- ═══ ag hatasi ═══ -->
+  <div id="v-neterr" class="note note-warn hidden" style="max-width: 520px; padding: 22px 24px">
+    <h2 style="font-size: 22px; margin-bottom: 10px; font-family: var(--serif)">Cannot reach the server</h2>
+    <p style="margin: 0 0 18px; color: var(--muted)">Your earnings are safe — they live on the server, not in this page. Nothing is lost while it is unreachable.</p>
+    <button class="btn btn-sm btn-quiet" id="retry-load">Retry</button>
+  </div>
+
+  <!-- ═══ oturum dustu ═══ -->
+  <div id="v-expired" class="note hidden" style="max-width: 520px; padding: 22px 24px">
+    <h2 style="font-size: 22px; margin-bottom: 10px; font-family: var(--serif)">Session expired</h2>
+    <p style="margin: 0 0 18px; color: var(--muted)">Sign once more to prove the wallet is still yours. Nothing was lost.</p>
+    <button class="btn btn-primary btn-sm" id="reconnect">Reconnect wallet</button>
+  </div>
+
+  <!-- ═══ pano ═══ -->
+  <div id="v-dash" class="hidden">
+
+    <h1 style="margin-bottom: 6px">Earnings</h1>
+    <p class="small" style="margin: 0 0 clamp(26px, 4vw, 40px)">Paid in USDC on Solana devnet. Your USDC account is created automatically on the first payout.</p>
+
+    <!-- bos -->
+    <div id="v-empty" class="hidden" style="border: 1px solid rgba(236,231,225,0.11); border-radius: 5px; padding: clamp(26px, 5vw, 46px)">
+      <h2 style="font-size: clamp(22px, 2.6vw, 28px); margin-bottom: 12px">No impressions yet</h2>
+      <p class="body" style="margin: 0 0 24px; max-width: 60ch">Install the CLI and start a Claude Code session. The first line can take a few minutes to show up here.</p>
+      <button class="btn" id="copy-install"><span style="color: var(--faint)">$</span>npm i -g lingersh &amp;&amp; linger init --spinner<span class="tag">copy</span></button>
+    </div>
+
+    <!-- veri -->
+    <div id="v-data" class="hidden">
+      <div style="display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: clamp(18px, 3vw, 44px); align-items: start" class="dash-grid">
+        <div>
+          <p class="figure-label">Payable</p>
+          <p class="figure" id="payable">$0</p>
+          <p class="small" style="margin: 10px 0 0"><span id="payable-micros"></span> micros · verified and yours</p>
+
+          <div style="margin-top: 22px">
+            <button class="btn btn-quiet hidden" id="withdraw">Withdraw</button>
+            <p class="small hidden" id="nothing-to-withdraw" style="margin: 8px 0 0">Nothing to withdraw yet — comes back the moment your balance clears the dust floor.</p>
+          </div>
+
+          <!-- Cekme kutusu — yalnizca acikca istendiginde. Reklamveren
+               panelindeki AYNI desen: hedef parametresi yok, para her zaman
+               kendi cuzdanina gider. -->
+          <div class="card hidden" id="withdraw-box" style="margin-top: 18px">
+            <h3 style="margin-bottom: 6px">Withdraw</h3>
+            <p class="small" style="margin: 0 0 18px; max-width: 50ch">Goes straight to your own wallet — there is no other destination.</p>
+            <div style="display: flex; flex-wrap: wrap; align-items: end; gap: 14px">
+              <label class="field" style="max-width: 200px">Amount in USD<input type="text" id="w-amount" placeholder="0.00"></label>
+              <button class="btn btn-sm btn-quiet" id="w-max">Max</button>
+              <button class="btn btn-primary" id="w-send">
+                <span class="spinner hidden" id="w-spin"></span><span>Withdraw</span>
+              </button>
+              <button class="btn btn-sm btn-quiet" id="w-cancel">Cancel</button>
+            </div>
+            <p class="small" style="margin: 12px 0 0" id="w-avail"></p>
+            <p class="err hidden" id="w-error"></p>
+            <div class="note hidden" id="w-done" style="margin-top: 14px; border-left-color: var(--accent)"></div>
+          </div>
+        </div>
+
+        <div class="grid-1px" id="rows"></div>
+      </div>
+
+      <section style="margin-top: clamp(38px, 6vw, 64px); padding-bottom: 0">
+        <h2 style="font-size: clamp(20px, 2.3vw, 26px); margin-bottom: 6px">Paid into</h2>
+        <p class="small" style="margin: 0 0 16px">The full address, so you can check it yourself.</p>
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px">
+          <code id="address" style="font-size: clamp(11px, 1.25vw, 13.5px)"></code>
+          <button class="btn btn-sm btn-quiet" id="copy-addr"><span class="tag">copy</span></button>
+          <a class="link-under" id="explorer-link" target="_blank" rel="noopener" style="font-size: 12.5px">View on Solana Explorer ↗</a>
+        </div>
+        <p class="small" style="margin: 16px 0 0">To be paid into a different wallet, run <span style="color: var(--muted)">linger login --force</span> in your terminal. Changing it needs a signature, so it cannot be done from a web page.</p>
+      </section>
+
+      <section style="margin-top: clamp(34px, 5vw, 56px); padding-bottom: 0">
+        <h2 style="font-size: clamp(20px, 2.3vw, 26px); margin-bottom: 18px">Payouts</h2>
+        <p class="small hidden" id="no-payouts" style="margin: 0"></p>
+        <div class="table-wrap hidden" id="payouts-wrap">
+          <table>
+            <thead><tr><th>Date</th><th style="text-align:right">Amount</th><th>State</th><th>Transaction</th></tr></thead>
+            <tbody id="payouts"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- Siralama profili — bos ve dolu panelde ayni; listede gorunmek icin
+         gosterim beklemek gerekmiyor. -->
+    <section style="margin-top: clamp(34px, 5vw, 56px); padding-bottom: 0" id="profile">
+      <h2 style="font-size: clamp(20px, 2.3vw, 26px); margin-bottom: 6px">Leaderboard</h2>
+      <p class="small" style="margin: 0 0 18px; max-width: 60ch">Off unless you turn it on. When listed, the <a class="link-under" href="/#board">home page</a> shows your nickname, country and earnings — never your wallet address.</p>
+      <div style="display: flex; flex-wrap: wrap; align-items: end; gap: 14px">
+        <label class="field" style="max-width: 220px">Nickname<input type="text" id="p-nick" maxlength="20" autocomplete="nickname" spellcheck="false" placeholder="3–20 letters, digits, _ . -"></label>
+        <label class="field" style="max-width: 240px">Country<select id="p-country"><option value="">Don't show</option></select></label>
+        <label class="mono" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-soft); padding-bottom: 10px; cursor: pointer">
+          <input type="checkbox" id="p-listed" style="accent-color: var(--accent)"> Show me on the leaderboard
+        </label>
+        <button class="btn btn-primary" id="p-save"><span class="spinner hidden" id="p-spin"></span><span>Save</span></button>
+      </div>
+      <p class="small hidden" id="p-guess" style="margin: 10px 0 0"></p>
+      <p class="err hidden" id="p-error"></p>
+      <p class="small hidden" id="p-done" style="margin: 12px 0 0; color: var(--good)"></p>
+    </section>
+
+    <!-- NEXT.md §10 — sponsor havuzu. CLI degismiyor: daemon ayni yayinci
+         kimligiyle calistigi icin katilim buradan yapilinca hemen gecerli. -->
+    <section style="margin-top: clamp(34px, 5vw, 56px); padding-bottom: 0" id="pool">
+      <h2 style="font-size: clamp(20px, 2.3vw, 26px); margin-bottom: 6px">Hackathon pool</h2>
+
+      <div id="pool-out">
+        <p class="small" style="margin: 0 0 18px; max-width: 62ch">Got a code from a hackathon or a sponsor? Join their pool. While you're in it, you only see the other teams' projects, and you're paid from the sponsor's budget.</p>
+        <div style="display: flex; flex-wrap: wrap; align-items: end; gap: 14px">
+          <label class="field" style="max-width: 220px">Pool code<input type="text" id="pool-code" spellcheck="false" autocomplete="off" placeholder="HACK-XXXXXX"></label>
+          <button class="btn btn-primary" id="pool-join"><span class="spinner hidden" id="pool-join-spin"></span><span>Join</span></button>
+        </div>
+      </div>
+
+      <div id="pool-in" class="hidden">
+        <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px">
+          <div>
+            <h3 id="pool-title" style="font-size: 20px"></h3>
+            <p class="small" style="margin: 4px 0 0" id="pool-meta"></p>
+          </div>
+          <button class="btn btn-sm btn-quiet" id="pool-leave">Leave pool</button>
+        </div>
+
+        <div id="pool-project" class="hidden" style="margin-top: 18px"></div>
+
+        <div id="pool-form" class="card hidden" style="margin-top: 18px">
+          <h3 style="margin-bottom: 6px">Submit your project</h3>
+          <p class="small" style="margin: 0 0 18px; max-width: 60ch">One line, one project per team. Other people in the pool will see it while their agent is thinking. You won't be shown your own project.</p>
+          <div class="term" style="margin-bottom: 18px">
+            <div class="term-status" style="border-top: 0; padding: 13px 16px">
+              <span class="ad"><span style="color: var(--accent)">✶</span>
+                <span class="ad-text"><span class="brand-name" id="pp-brand">Project</span><span class="sep"> — <span id="pp-text">what it does, in a few words</span> · </span><span class="cta" id="pp-cta">yourproject.dev</span></span>
+              </span>
+              <span class="ad-right" id="pp-count">0/80</span>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px">
+            <label class="field">Project name<input type="text" id="pf-brand" placeholder="Your project"></label>
+            <label class="field">Domain<input type="text" id="pf-cta" placeholder="yourproject.dev"></label>
+          </div>
+          <label class="field" style="margin-top: 14px">Message<input type="text" id="pf-text" placeholder="what it does, in a few words"></label>
+          <div style="margin-top: 18px">
+            <button class="btn btn-primary" id="pf-send"><span class="spinner hidden" id="pf-spin"></span><span>Submit project</span></button>
+          </div>
+        </div>
+      </div>
+      <p class="err hidden" id="pool-error"></p>
+    </section>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>✶ linger — devnet</span>
+    <div style="display: flex; gap: 24px">
+      <a href="https://github.com/ynsmlkc/Linger" target="_blank" rel="noopener">GitHub</a>
+      <a href="/privacy">Privacy</a>
+    </div>
+  </div>
+</footer>
+
+<style>
+  @media (max-width: 780px) { .dash-grid { grid-template-columns: 1fr !important; } }
+</style>
+
+<script type="module">
+import {
+  $, show, usd, short, api, ApiError, session, login, walletReady,
+  copyButton, explorer, toMicros,
+} from '/app.js';
+import { flag, countryName, countryCodes } from '/globe.js';
+
+const views = ['v-connect', 'v-loading', 'v-neterr', 'v-expired', 'v-dash'];
+const view = (id) => views.forEach((v) => show($('#' + v), v === id));
+
+copyButton($('#copy-install'), () => 'npm i -g lingersh && linger init --spinner');
+copyButton($('#copy-addr'), () => session.address || '');
+
+/* ─────────── giris ─────────── */
+
+// Eklenti tespiti ASENKRON: eklentiler sayfadan sonra enjekte olabilir.
+walletReady().then((ok) => show($('#no-wallet'), !ok));
+
+async function doLogin() {
+  show($('#connect-error'), false);
+  show($('#connect-spin'), true);
+  try {
+    await login('publisher', (step) => { $('#connect-label').textContent = step; });
+    await load();
+  } catch (e) {
+    // Cuzdanin reddi hata degil, KARARDIR. Kullaniciya "bir sey ters
+    // gitti" demek yerine ne oldugunu soyluyoruz.
+    const msg = /reject|denied|closed|declined/i.test(e.message)
+      ? 'The wallet closed without signing. Nothing happened — you can start again.'
+      : e.message;
+    $('#connect-error-text').textContent = msg;
+    show($('#connect-error'), true);
+  } finally {
+    show($('#connect-spin'), false);
+    $('#connect-label').textContent = 'Connect wallet';
+  }
+}
+$('#connect').onclick = doLogin;
+$('#retry-connect').onclick = doLogin;
+$('#reconnect').onclick = () => { session.clear(); view('v-connect'); };
+$('#signout').onclick = () => { session.clear(); location.reload(); };
+
+/* ─────────── veri ─────────── */
+
+async function load() {
+  if (!session.token || session.role !== 'publisher') { view('v-connect'); return; }
+
+  $('#who-addr').textContent = short(session.address);
+  show($('#who'), true);
+  show($('#signout'), true);
+  view('v-loading');
+
+  let data;
+  try {
+    data = await api('/v1/me/balance');
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) { view('v-expired'); return; }
+    view('v-neterr'); return;
+  }
+
+  render(data);
+  view('v-dash');
+  void loadProfile();
+  void loadPool();
+}
+$('#retry-load').onclick = load;
+
+/* ─────────── siralama profili ─────────── */
+
+for (const code of countryCodes()) {
+  const o = document.createElement('option');
+  o.value = code; o.textContent = `${flag(code)} ${countryName(code)}`;
+  $('#p-country').append(o);
+}
+
+async function loadProfile() {
+  try {
+    const { profile, suggestedCountry } = await api('/v1/me/profile');
+    $('#p-nick').value = profile?.nickname ?? '';
+    $('#p-country').value = profile?.country ?? '';
+    $('#p-listed').checked = profile?.listed ?? false;
+    // CCgather gibi: ulke secilmemisse baglantidan tahmin edilip onceden
+    // secilir. Kaydedilene kadar hicbir yere yazilmaz.
+    if (!profile?.country && suggestedCountry) {
+      $('#p-country').value = suggestedCountry;
+      $('#p-guess').textContent = `${countryName(suggestedCountry)} was picked from your connection. Change it if that's wrong; nothing is saved until you press Save.`;
+      show($('#p-guess'), true);
+    }
+  } catch { /* profil okunamazsa form bos kalir; kaydetmek yine calisir */ }
+}
+
+$('#p-save').onclick = async () => {
+  show($('#p-error'), false); show($('#p-done'), false); show($('#p-spin'), true);
+  $('#p-save').disabled = true;
+  try {
+    const { profile } = await api('/v1/me/profile', {
+      method: 'PUT',
+      body: { nickname: $('#p-nick').value.trim(), country: $('#p-country').value || null, listed: $('#p-listed').checked },
+    });
+    $('#p-done').textContent = profile.listed
+      ? `Saved. You'll appear as ${profile.nickname} once you have verified earnings.`
+      : 'Saved. You are not listed.';
+    show($('#p-done'), true);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) { view('v-expired'); return; }
+    $('#p-error').textContent = e.status === 409 ? 'That nickname is taken.' : e.message;
+    show($('#p-error'), true);
+  } finally {
+    show($('#p-spin'), false); $('#p-save').disabled = false;
+  }
+};
+
+
+let me = { withdrawableMicros: '0' };
+
+function render(d) {
+  me = d;
+  const lifetime = BigInt(d.lifetimeMicros);
+
+  const empty = lifetime === 0n && BigInt(d.pendingMicros) === 0n;
+  show($('#v-empty'), empty);
+  show($('#v-data'), !empty);
+  if (empty) return;
+
+  $('#payable').textContent = usd(d.payableMicros);
+  $('#payable-micros').textContent = d.payableMicros.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+
+  const canWithdraw = BigInt(d.withdrawableMicros || '0') > 0n;
+  show($('#withdraw'), canWithdraw);
+  show($('#nothing-to-withdraw'), !canWithdraw);
+  if (!canWithdraw) show($('#withdraw-box'), false);
+
+  const rows = [
+    ['Pending', usd(d.pendingMicros), 'counted, not verified yet — may not survive'],
+  ];
+  if (BigInt(d.inFlightMicros) > 0n) {
+    rows.push(['In flight', usd(d.inFlightMicros), 'sent to the chain, waiting for confirmation']);
+  }
+  rows.push(['Lifetime', usd(d.lifetimeMicros), 'everything you have ever earned']);
+
+  $('#rows').innerHTML = rows.map(([k, v, note]) => `
+    <div style="padding: 15px 18px; display: flex; align-items: baseline; justify-content: space-between; gap: 16px">
+      <div><p class="mono" style="margin:0; font-size:13px; color:var(--ink-soft)">${k}</p>
+      <p class="mono" style="margin:3px 0 0; font-size:11.5px; line-height:1.5; color:var(--faint)">${note}</p></div>
+      <span class="mono" style="font-size:15px; white-space:nowrap">${v}</span>
+    </div>`).join('');
+
+  $('#address').textContent = session.address;
+  $('#explorer-link').href = explorer.account(session.address);
+
+  const ps = d.recentPayouts || [];
+  show($('#no-payouts'), ps.length === 0);
+  show($('#payouts-wrap'), ps.length > 0);
+  if (ps.length === 0) {
+    $('#no-payouts').textContent = 'Nothing sent yet. Withdraw whenever you have a balance above the network\'s dust floor.';
+  } else {
+    $('#payouts').innerHTML = ps.map((p) => `
+      <tr>
+        <td>${new Date(p.at).toISOString().slice(0, 10)}</td>
+        <td class="num">${usd(p.amountMicros)}</td>
+        <td><span style="color:${p.state === 'settled' ? 'var(--good)' : 'var(--muted)'}">${p.state}</span></td>
+        <td><a href="${explorer.tx(p.txHash)}" target="_blank" rel="noopener" style="color:var(--accent)">${p.txHash.slice(0, 10)}… ↗</a></td>
+      </tr>`).join('');
+  }
+}
+
+/* ─────────── para cekme ─────────── */
+
+const wBox = $('#withdraw-box');
+$('#withdraw').onclick = () => {
+  show(wBox, true);
+  $('#w-avail').textContent = `${usd(me.withdrawableMicros)} available to withdraw.`;
+  show($('#w-error'), false); show($('#w-done'), false);
+  wBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+};
+$('#w-cancel').onclick = () => show(wBox, false);
+$('#w-max').onclick = () => {
+  $('#w-amount').value = usd(me.withdrawableMicros).replace('$', '');
+};
+
+$('#w-send').onclick = async () => {
+  show($('#w-error'), false);
+  const amount = toMicros($('#w-amount').value);
+  if (amount === null || amount <= 0n) {
+    $('#w-error').textContent = 'Enter an amount, e.g. 12.50';
+    show($('#w-error'), true); return;
+  }
+  if (amount > BigInt(me.withdrawableMicros)) {
+    $('#w-error').textContent = `Only ${usd(me.withdrawableMicros)} can be withdrawn right now.`;
+    show($('#w-error'), true); return;
+  }
+
+  show($('#w-spin'), true);
+  $('#w-send').disabled = true;
+  try {
+    const r = await api('/v1/publisher/withdraw', {
+      method: 'POST', body: { amountMicros: amount.toString() },
+    });
+    $('#w-done').innerHTML =
+      `Sent ${usd(r.amountMicros)}. `
+      + `<a href="${explorer.tx(r.txHash)}" target="_blank" rel="noopener" style="color: var(--accent)">View on the chain ↗</a>`;
+    show($('#w-done'), true);
+    $('#w-amount').value = '';
+    await load();
+    show(wBox, true);
+  } catch (e) {
+    $('#w-error').textContent = e.message;
+    show($('#w-error'), true);
+  } finally {
+    show($('#w-spin'), false);
+    $('#w-send').disabled = false;
+  }
+};
+
+load();
+
+/* ─────────── sponsor havuzu (NEXT.md §10) ─────────── */
+
+const poolEsc = (x) => String(x).replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
+const poolErr = (msg) => { $('#pool-error').textContent = msg || ''; show($('#pool-error'), !!msg); };
+
+async function loadPool() {
+  let d;
+  try { d = await api('/v1/me/pool'); } catch { return; }
+  const p = d.pool;
+  show($('#pool-out'), !p);
+  show($('#pool-in'), !!p);
+  if (!p) return;
+
+  $('#pool-title').textContent = p.name;
+  $('#pool-meta').textContent = p.status === 'open'
+    ? `${p.code} · ${p.members} ${p.members === 1 ? 'member' : 'members'} · you're seeing this pool's projects`
+    : `${p.code} · this pool is closed, you're back on the regular network`;
+
+  show($('#pool-project'), !!d.project);
+  show($('#pool-form'), !d.project && p.status === 'open');
+  if (d.project) {
+    const c = d.project;
+    $('#pool-project').innerHTML = `
+      <p class="small" style="margin: 0 0 8px">Your project, as other teams see it${c.status === 'active' ? '' : ' (paused by the sponsor)'}:</p>
+      <div class="term-status" style="border: 1px solid var(--line); border-radius: 4px; padding: 11px 14px; min-height: 0">
+        <span class="ad"><span style="color: var(--accent)">✶</span>
+          <span class="ad-text"><span class="brand-name">${poolEsc(c.brand)}</span><span class="sep"> — ${poolEsc(c.text)} · </span><span class="cta">${poolEsc(c.cta)}</span></span>
+        </span>
+      </div>`;
+  }
+}
+
+$('#pool-join').onclick = async () => {
+  poolErr(null); show($('#pool-join-spin'), true);
+  try {
+    await api('/v1/me/pool/join', { method: 'POST', body: { code: $('#pool-code').value.trim() } });
+    $('#pool-code').value = '';
+    await loadPool();
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) { view('v-expired'); return; }
+    poolErr(e.status === 404 ? 'No open pool with that code.' : e.message);
+  } finally { show($('#pool-join-spin'), false); }
+};
+
+$('#pool-leave').onclick = async () => {
+  const b = $('#pool-leave');
+  if (b.dataset.armed !== '1') { b.dataset.armed = '1'; b.textContent = 'Click again to leave'; return; }
+  b.dataset.armed = ''; b.textContent = 'Leave pool';
+  try { await api('/v1/me/pool/leave', { method: 'POST' }); } catch (e) { poolErr(e.message); }
+  await loadPool();
+};
+
+const pf = { brand: $('#pf-brand'), text: $('#pf-text'), cta: $('#pf-cta') };
+function poolPreview() {
+  const brand = pf.brand.value.trim() || 'Project';
+  const text = pf.text.value.trim() || 'what it does, in a few words';
+  const cta = pf.cta.value.trim().toLowerCase() || 'yourproject.dev';
+  $('#pp-brand').textContent = brand; $('#pp-text').textContent = text; $('#pp-cta').textContent = cta;
+  const len = `✶ ${brand} — ${text} · ${cta}`.length;
+  $('#pp-count').textContent = `${len}/80`;
+  $('#pp-count').style.color = len > 80 ? 'var(--accent)' : '';
+}
+Object.values(pf).forEach((el) => el.addEventListener('input', poolPreview));
+poolPreview();
+
+$('#pf-send').onclick = async () => {
+  poolErr(null); show($('#pf-spin'), true);
+  try {
+    await api('/v1/me/pool/project', { method: 'POST', body: {
+      brand: pf.brand.value.trim(), text: pf.text.value.trim(), cta: pf.cta.value.trim().toLowerCase(),
+    } });
+    pf.brand.value = ''; pf.text.value = ''; pf.cta.value = ''; poolPreview();
+    await loadPool();
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) { view('v-expired'); return; }
+    poolErr(e.message);
+  } finally { show($('#pf-spin'), false); }
+};
+</script>
+</body>
+</html>

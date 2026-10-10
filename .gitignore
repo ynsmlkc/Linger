@@ -1,0 +1,25 @@
+node_modules/
+*.log
+.env
+.DS_Store
+spikes/**/out/
+packages/*/dist/
+
+# Gizli anahtarlar — asla commitlenmez
+.env.*
+!.env.example
+
+# Devnet havuz anahtari — git'e girmez
+.devnet-faucet.json
+
+# Bilinen sorunlar notu — YEREL KALIR.
+# Icinde saldiri senaryolari ve savunmalarin nerede tutmadigi yaziyor;
+# depoyu goren birine yol tarifi olurdu.
+PROBLEMS.md
+
+# Devnet test cuzdani — git'e girmez
+.devnet-test-payer.json
+
+# IP → ulke veritabani; Docker derlemesinde indiriliyor (bkz. Dockerfile)
+*.mmdb
+*.mmdb.gz

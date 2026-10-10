@@ -1,0 +1,132 @@
+/**
+ * Daemon yasam dongusu testleri.
+ *
+ * Buradaki en onemli test bir GUVENLIK testi: bayat bir pidfile yuzunden
+ * masum bir sureci oldurmemek.
+ */
+
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { spawn, type ChildProcess } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+let dir = ''
+let innocent: ChildProcess | null = null
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), 'linger-pid-'))
+  process.env['LINGER_HOME'] = join(dir, '.linger')
+  process.env['LINGER_SOCKET'] = join(dir, '.linger', 'lingerd.sock')
+})
+
+afterEach(() => {
+  innocent?.kill('SIGKILL')
+  innocent = null
+  rmSync(dir, { recursive: true, force: true })
+  delete process.env['LINGER_HOME']
+  delete process.env['LINGER_SOCKET']
+})
+
+// Yollar cagri aninda hesaplandigi icin modulu bir kez import etmek yeterli.
+import * as dc from '../src/cli/daemon-control.js'
+const fresh = async () => dc
+
+describe('bayat pidfile — masum surec oldurulmez', () => {
+  it('daemon calismiyorken stop() KIMSEYI oldurmez', async () => {
+    const dc = await fresh()
+
+    // Gercek, yasayan bir surec baslat ve pid'ini pidfile'a yaz.
+    // Senaryo: onceki bir `linger init` daemon'i baslatamadi ama pidfile
+    // birakti; isletim sistemi o pid'i bu surece yeniden atadi.
+    innocent = spawn(process.execPath, ['-e', 'setTimeout(()=>{}, 60000)'], { stdio: 'ignore' })
+    await new Promise((r) => setTimeout(r, 200))
+    const pid = innocent.pid!
+    expect(pid).toBeGreaterThan(0)
+
+    const { mkdirSync } = await import('node:fs')
+    mkdirSync(join(dir, '.linger'), { recursive: true })
+    writeFileSync(dc.pidPath(), String(pid))
+
+    await dc.stop()
+    await new Promise((r) => setTimeout(r, 300))
+
+    // Masum surec YASIYOR olmali.
+    let alive = true
+    try { process.kill(pid, 0) } catch { alive = false }
+    expect(alive, 'bayat pidfile masum sureci oldurmemeli').toBe(true)
+  })
+
+  it('bayat pidfile temizlenir', async () => {
+    const dc = await fresh()
+    const { mkdirSync } = await import('node:fs')
+    mkdirSync(join(dir, '.linger'), { recursive: true })
+    writeFileSync(dc.pidPath(), '999999')
+
+    await dc.stop()
+    expect(existsSync(dc.pidPath()), 'bayat dosya silinmeli').toBe(false)
+  })
+
+  it('pidfile yoksa stop() zararsiz', async () => {
+    const dc = await fresh()
+    await expect(dc.stop()).resolves.toBe(false)
+  })
+})
+
+describe('basarisiz baslatma', () => {
+  it('daemon acilamazsa pidfile BIRAKILMAZ', async () => {
+    // Pidfile birakmak, bir sonraki `uninstall`in rastgele bir pid'i
+    // oldurmesine yol acar.
+    const dc = await fresh()
+    const bozuk = join(dir, 'bozuk.mjs')
+    writeFileSync(bozuk, 'throw new Error("acilamadim")')
+
+    const r = await dc.start({ entry: bozuk, waitMs: 1_500 })
+    expect('error' in r).toBe(true)
+    expect(existsSync(dc.pidPath()), 'basarisiz baslatma iz birakmamali').toBe(false)
+  })
+
+  it('hata mesaji log dosyasini gosterir', async () => {
+    const dc = await fresh()
+    const bozuk = join(dir, 'bozuk.mjs')
+    writeFileSync(bozuk, 'throw new Error("acilamadim")')
+    const r = await dc.start({ entry: bozuk, waitMs: 1_000 })
+    if ('error' in r) expect(r.error).toContain('daemon.log')
+  })
+})
+
+describe('canlilik kontrolu', () => {
+  it('daemon yokken isAlive false', async () => {
+    const dc = await fresh()
+    expect(await dc.isAlive(join(dir, 'yok.sock'), 300)).toBe(false)
+  })
+})
+
+describe('cozulmeyen promise — sessiz cikis', () => {
+  it('sunucu cevap vermeden kapanirsa ask() null DONER, asilmaz', async () => {
+    // Gercek belirti: `linger uninstall` banner'i basip duruyordu, ayarlar
+    // silinmiyordu, cikis kodu 0'di. Ucte bir tekrarlanan bir yaristi.
+    //
+    // Sebep: daemon'a SIGTERM'den sonra baglanti kuruluyor ama daemon cevap
+    // veremeden soketi kapatiyor. O durumda 'error' ateslenmez, yalnizca
+    // 'close' gelir. Dinlenmezse promise cozulmez ve Node isini bitirmeden
+    // kod 0 ile cikar.
+    const dc = await fresh()
+    const { createServer } = await import('node:net')
+    const { mkdirSync } = await import('node:fs')
+    mkdirSync(join(dir, '.linger'), { recursive: true })
+    const sockPath = join(dir, '.linger', 'sessiz.sock')
+
+    // Baglantiyi kabul edip HICBIR SEY yazmadan kapatan sunucu.
+    const srv = createServer((c) => c.destroy())
+    await new Promise<void>((r) => srv.listen(sockPath, r))
+
+    const result = await Promise.race([
+      dc.ask({ t: 'health' }, sockPath, 5_000),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('ASILDI')), 2_000)),
+    ])
+    expect(result).toBeNull()
+
+    await new Promise<void>((r) => srv.close(() => r()))
+  })
+})

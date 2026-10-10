@@ -1,0 +1,309 @@
+/**
+ * Claude Code `settings.json` yonetimi — §6.1.
+ *
+ * Bu dosya kullanicinin kendi konfigurasyonu. Sessizce ezmek affedilmez;
+ * `linger uninstall` her seyi ILK HALINE dondurebilmek zorunda.
+ *
+ * Tasarim kurallari:
+ *   • Yalnizca KENDI alanlarimiza dokunuruz, dosyanin geri kalanina asla
+ *   • Mevcut bir `statusLine` varsa UZERINE YAZMAYIZ — uyarir, sorariz
+ *   • Kaldirma yedekten degil, kendi izimizi silerek yapilir: aradan gecen
+ *     surede kullanici baska ayarlar degistirmis olabilir
+ *   • Her yazmadan once zaman damgali yedek alinir
+ */
+
+import {
+  readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, readdirSync, unlinkSync,
+  realpathSync, renameSync, statSync,
+} from 'node:fs'
+import { homedir } from 'node:os'
+import { join, dirname } from 'node:path'
+
+export const CLAUDE_DIR = process.env['CLAUDE_CONFIG_DIR'] ?? join(homedir(), '.claude')
+export const SETTINGS_PATH = join(CLAUDE_DIR, 'settings.json')
+
+/** Bizim yazdigimiz her seye bu iz konur — kaldirirken bunu arariz. */
+export const MARKER = '__linger'
+
+export interface StatusLineSetting {
+  type: 'command'
+  command: string
+  refreshInterval?: number
+  [MARKER]?: true
+}
+
+export interface HookEntry {
+  matcher?: string
+  hooks: { type: 'command'; command: string }[]
+  [MARKER]?: true
+}
+
+export interface ClaudeSettings {
+  statusLine?: StatusLineSetting
+  spinnerVerbs?: { mode: 'append' | 'replace'; verbs: string[]; [MARKER]?: true }
+  hooks?: Record<string, HookEntry[]>
+  [k: string]: unknown
+}
+
+export interface Conflict {
+  readonly field: string
+  readonly current: string
+  /** Bizim yazdigimiz bir sey mi, baskasinin mi? */
+  readonly ours: boolean
+}
+
+export function readSettings(path = SETTINGS_PATH): ClaudeSettings {
+  if (!existsSync(path)) return {}
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as ClaudeSettings
+  } catch (e) {
+    // Bozuk bir settings.json'u ezmek felakettir — kullanici tum ayarlarini
+    // kaybeder. Okuyamiyorsak DOKUNMUYORUZ.
+    throw new Error(`could not read settings.json (it may contain broken JSON): ${path}`)
+  }
+}
+
+/** Cakisma var mi? `linger init` bunu ONCE sorar. */
+export function detectConflicts(s: ClaudeSettings): Conflict[] {
+  const out: Conflict[] = []
+  if (s.statusLine) {
+    out.push({
+      field: 'statusLine',
+      current: s.statusLine.command,
+      ours: s.statusLine[MARKER] === true,
+    })
+  }
+  if (s.spinnerVerbs) {
+    out.push({
+      field: 'spinnerVerbs',
+      current: `${s.spinnerVerbs.mode}: ${s.spinnerVerbs.verbs.join(', ').slice(0, 40)}`,
+      ours: s.spinnerVerbs[MARKER] === true,
+    })
+  }
+  return out
+}
+
+/** Yedek adlandirmasi icin. Testte sabit, uretimde gercek saat. */
+export type NowFn = () => number
+
+export interface InstallOptions {
+  readonly statusLineCommand: string
+  readonly hookCommand: string
+  readonly refreshIntervalSec: number
+  /** Spinner katmani opsiyonel — ADR-001'de "kaybedilebilir eklenti". */
+  readonly spinnerVerbs?: readonly string[]
+  /** Cakisma varsa bile uzerine yaz. Kullanici acikca onaylamis olmali. */
+  readonly force?: boolean
+  readonly now?: NowFn
+}
+
+export interface InstallResult {
+  readonly changed: readonly string[]
+  readonly skipped: readonly Conflict[]
+  readonly backupPath: string | null
+}
+
+/** Tur takibi icin gereken hook'lar. `PreToolUse`/`PostToolUse` YOK. */
+export const TURN_HOOKS = ['UserPromptSubmit', 'Stop', 'SessionStart'] as const
+
+export function install(opts: InstallOptions, path = SETTINGS_PATH): InstallResult {
+  const now = opts.now ?? Date.now
+  const settings = readSettings(path)
+  const conflicts = detectConflicts(settings).filter((c) => !c.ours)
+  const changed: string[] = []
+  const skipped: Conflict[] = []
+
+  const backupPath = existsSync(path) ? backup(path, now) : null
+
+  // statusLine
+  const slConflict = conflicts.find((c) => c.field === 'statusLine')
+  if (slConflict && !opts.force) {
+    skipped.push(slConflict)
+  } else {
+    settings.statusLine = {
+      type: 'command',
+      command: opts.statusLineCommand,
+      refreshInterval: opts.refreshIntervalSec,
+      [MARKER]: true,
+    }
+    changed.push('statusLine')
+  }
+
+  // spinnerVerbs — opsiyonel katman
+  if (opts.spinnerVerbs && opts.spinnerVerbs.length > 0) {
+    const svConflict = conflicts.find((c) => c.field === 'spinnerVerbs')
+    if (svConflict && !opts.force) {
+      skipped.push(svConflict)
+    } else {
+      settings.spinnerVerbs = { mode: 'replace', verbs: [...opts.spinnerVerbs], [MARKER]: true }
+      changed.push('spinnerVerbs')
+    }
+  }
+
+  // hook'lar — kullanicininkileri KORUYARAK, bizimkileri TAZELEYEREK.
+  //
+  // "Zaten var, atla" YETMEZ: surum yukseltmesinde ikili yolu degisir ve
+  // eski komut oldugu yerde kalir. Kullanici `linger init` calistirir,
+  // "kuruldu" gorur, ama hook'lar olu bir dosyayi cagirmaya devam eder.
+  settings.hooks ??= {}
+  for (const event of TURN_HOOKS) {
+    const list: HookEntry[] = (settings.hooks[event] ??= [])
+    const wanted = `${opts.hookCommand} ${event}`
+    const mine = list.findIndex((h) => h[MARKER] === true)
+    const entry: HookEntry = { matcher: '', hooks: [{ type: 'command', command: wanted }], [MARKER]: true }
+
+    if (mine === -1) {
+      list.push(entry)
+      changed.push(`hooks.${event}`)
+    } else if (list[mine]!.hooks[0]?.command !== wanted) {
+      list[mine] = entry
+      changed.push(`hooks.${event} (guncellendi)`)
+    }
+  }
+
+  writeSettings(settings, path)
+  return { changed, skipped, backupPath }
+}
+
+/**
+ * Kaldirma — YEDEKTEN DEGIL, kendi izimizi silerek.
+ *
+ * Yedege donmek yanlis olurdu: kurulumdan sonra kullanici baska ayarlar
+ * degistirmis olabilir ve onlari geri almak, bizim eklediklerimizi
+ * birakmaktan daha kotu.
+ */
+export function uninstall(path = SETTINGS_PATH, now: NowFn = Date.now): { removed: string[]; backupPath: string | null } {
+  if (!existsSync(path)) return { removed: [], backupPath: null }
+
+  const settings = readSettings(path)
+  const backupPath = backup(path, now)
+  const removed: string[] = []
+
+  if (settings.statusLine?.[MARKER]) { delete settings.statusLine; removed.push('statusLine') }
+  if (settings.spinnerVerbs?.[MARKER]) { delete settings.spinnerVerbs; removed.push('spinnerVerbs') }
+
+  for (const [event, list] of Object.entries(settings.hooks ?? {})) {
+    const kept = list.filter((h) => h[MARKER] !== true)
+    if (kept.length === list.length) continue
+    removed.push(`hooks.${event}`)
+    if (kept.length === 0) delete settings.hooks![event]
+    else settings.hooks![event] = kept
+  }
+  if (settings.hooks && Object.keys(settings.hooks).length === 0) delete settings.hooks
+
+  writeSettings(settings, path)
+  return { removed, backupPath }
+}
+
+/**
+ * Kurulum saglam mi? `linger doctor` bunu sorar.
+ *
+ * Ozellikle aradigi sey: ayarlarimizin BASKA BIR ARAC tarafindan
+ * degistirilmis olmasi. Ayni yuzey icin yarisan baska bir eklenti,
+ * periyodik olarak kendi ayarini geri koyabiliyor — kullanici "Linger
+ * calismiyor" der ve sebebini bilemez.
+ */
+export interface Diagnosis {
+  installed: boolean
+  hijacked: boolean
+  detail: string
+  /**
+   * `spinnerVerbs` baska bir araca mi ait?
+   *
+   * SpinnerSync bu durumda SESSIZCE devre disi kalir — kullanicinin ayarini
+   * ezmeme kurali geregi dogru davranis, ama "spinner calismiyor" diye
+   * debug edilirse yanlis yere bakilir. Bu yuzden acikca raporlanir.
+   */
+  spinnerOwner: 'bizim' | 'baskasinin' | 'yok'
+  spinnerDetail: string | null
+}
+
+export function diagnose(expectedCommand: string, path = SETTINGS_PATH): Diagnosis {
+  const none = { spinnerOwner: 'yok' as const, spinnerDetail: null }
+  if (!existsSync(path)) return { installed: false, hijacked: false, detail: 'settings.json does not exist', ...none }
+
+  let settings: ClaudeSettings
+  try { settings = readSettings(path) } catch (e) {
+    return { installed: false, hijacked: false, detail: String(e instanceof Error ? e.message : e), ...none }
+  }
+
+  const sv = settings.spinnerVerbs
+  const spinner = sv
+    ? sv[MARKER] === true
+      ? { spinnerOwner: 'bizim' as const, spinnerDetail: (sv.verbs ?? []).join(', ') || 'list is empty' }
+      : { spinnerOwner: 'baskasinin' as const,
+          spinnerDetail: `belongs to another tool, sync is off: ${(sv.verbs ?? []).join(', ').slice(0, 40)}` }
+    : none
+
+  const sl = settings.statusLine
+  if (!sl) return { installed: false, hijacked: false, detail: 'statusLine is not configured', ...spinner }
+
+  if (sl[MARKER] && sl.command === expectedCommand) {
+    return { installed: true, hijacked: false, detail: 'setup is sound', ...spinner }
+  }
+  if (sl[MARKER] && sl.command !== expectedCommand) {
+    return { installed: false, hijacked: false, detail: 'leftover install from an old version — run `linger init` again', ...spinner }
+  }
+  return {
+    installed: false, hijacked: true,
+    detail: `statusLine belongs to another tool: ${sl.command.slice(0, 60)}`,
+    ...spinner,
+  }
+}
+
+/* ── ic isler ── */
+
+function writeSettings(s: ClaudeSettings, path: string): void {
+  mkdirSync(dirname(path), { recursive: true })
+  writeSettingsFile(path, s)
+}
+
+/**
+ * Kullanicinin `settings.json`'unu GUVENLE yazar — iki kural:
+ *
+ * 1. **Atomik.** Yerinde yazmak (`writeFileSync(path)`) yarida kesilirse ya
+ *    da Claude Code ayni anda yazarsa yarim bir JSON birakir; `readSettings`
+ *    bozuk dosyaya dokunmayi reddettigi icin `linger uninstall` bile calismaz
+ *    hale gelir. Gecici dosyaya yazip `rename` etmek ya eski ya yeni dosyayi
+ *    birakir, arasini asla.
+ *
+ * 2. **Sembolik baglantiyi korur.** Bircok gelistirici `~/.claude/settings.json`'u
+ *    dotfiles deposuna (stow, chezmoi) baglar. Baglantinin USTUNE `rename`
+ *    etmek baglantiyi duz bir dosyayla degistirir — depo ile gercek ayar
+ *    sessizce ayrisir. Bu yuzden gercek hedef cozulur ve gecici dosya ONUN
+ *    yanina yazilir (rename ancak ayni dizinde atomik).
+ *
+ * Dosyanin mevcut izinleri korunur; yeni dosya 0600.
+ */
+export function writeSettingsFile(path: string, s: ClaudeSettings): void {
+  const target = existsSync(path) ? realpathSync(path) : path
+  const mode = existsSync(target) ? statSync(target).mode & 0o777 : 0o600
+  const tmp = `${target}.linger-tmp-${process.pid}`
+  try {
+    writeFileSync(tmp, JSON.stringify(s, null, 2) + '\n', { mode })
+    renameSync(tmp, target)
+  } catch (e) {
+    try { unlinkSync(tmp) } catch { /* zaten yok */ }
+    throw e
+  }
+}
+
+function backup(path: string, now: NowFn): string {
+  const dir = join(dirname(path), 'linger-backups')
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const stamp = new Date(now()).toISOString().replace(/[:.]/g, '-')
+  let target = join(dir, `settings.${stamp}.json`)
+  let n = 1
+  while (existsSync(target)) target = join(dir, `settings.${stamp}.${n++}.json`)
+  copyFileSync(path, target)
+  prune(dir)
+  return target
+}
+
+/** Yedekler sonsuza kadar birikmesin — son 10 tanesi yeter. */
+function prune(dir: string, keep = 10): void {
+  const files = readdirSync(dir).filter((f) => f.startsWith('settings.')).sort()
+  for (const f of files.slice(0, Math.max(0, files.length - keep))) {
+    try { unlinkSync(join(dir, f)) } catch { /* onemsiz */ }
+  }
+}
