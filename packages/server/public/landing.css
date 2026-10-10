@@ -105,7 +105,11 @@ body.landing {
   font-family: var(--mono); font-size: 11px; line-height: 13px; letter-spacing: 0;
   white-space: pre; overflow: hidden; user-select: none; pointer-events: none;
   color: transparent;
-  background: radial-gradient(ellipse 30% 44% at 50% 17%, oklch(0.86 0.13 70) 0%, oklch(0.74 0.16 52) 22%, oklch(0.58 0.12 40) 48%, #6b6259 72%, #4a453f 100%);
+  /* Ustteki katman fare isigi (index.html); --ga 0 iken gorunmez. */
+  --mx: 50%; --my: 50%; --ga: 0;
+  background:
+    radial-gradient(circle 110px at var(--mx) var(--my), oklch(0.84 0.14 66 / var(--ga)) 0%, oklch(0.72 0.15 50 / calc(var(--ga) * 0.6)) 45%, transparent 100%),
+    radial-gradient(ellipse 30% 44% at 50% 17%, oklch(0.86 0.13 70) 0%, oklch(0.74 0.16 52) 22%, oklch(0.58 0.12 40) 48%, #6b6259 72%, #4a453f 100%);
   -webkit-background-clip: text; background-clip: text;
   opacity: 1;
 }
