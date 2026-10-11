@@ -31,7 +31,7 @@ export function prodProblems(env: Env): string[] {
   if (env['LINGER_ENV'] !== 'production') return []
   const out: string[] = []
 
-  for (const k of ['LINGER_DB', 'LINGER_SEP10_SECRET', 'LINGER_HOME_DOMAIN', 'LINGER_IP_SALT'] as const) {
+  for (const k of ['LINGER_DB', 'LINGER_HOME_DOMAIN', 'LINGER_IP_SALT'] as const) {
     if (!env[k]) out.push(`${k} tanimli degil`)
   }
 

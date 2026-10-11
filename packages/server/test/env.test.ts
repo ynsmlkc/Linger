@@ -11,7 +11,6 @@ import { prodProblems, readServerEnv } from '../src/env.js'
 const TAM = {
   LINGER_ENV: 'production',
   LINGER_DB: '/data/linger.db',
-  LINGER_SEP10_SECRET: 'S...',
   LINGER_HOME_DOMAIN: 'linger.example',
   LINGER_IP_SALT: 'tuz',
 }

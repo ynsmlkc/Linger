@@ -23,3 +23,7 @@ PROBLEMS.md
 # IP → ulke veritabani; Docker derlemesinde indiriliyor (bkz. Dockerfile)
 *.mmdb
 *.mmdb.gz
+
+# Devnet demo: sicak cuzdan, test USDC mint anahtari ve yerel DB — git'e girmez
+.devnet-*.json
+.devnet-data/
