@@ -11,67 +11,67 @@
   /* ── calisma alani ── */
   .ws { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: clamp(24px, 4vw, 52px); align-items: start; }
   .ws-nav { position: sticky; top: 84px; display: flex; flex-direction: column; gap: 2px; }
-  .ws-nav > a { font-family: var(--mono); font-size: 13px; color: var(--muted); text-decoration: none; padding: 8px 10px; border-radius: 4px; border-left: 2px solid transparent; display: flex; justify-content: space-between; }
-  .ws-nav > a:hover { color: var(--ink); background: rgba(236, 231, 225, 0.03); }
-  .ws-nav > a.on { color: var(--ink); border-left-color: var(--accent); background: var(--accent-bg); }
-  .ws-count { color: var(--faint); }
+  .ws-nav > a { font-family: var(--sans); font-size: 14px; color: var(--ink-2); text-decoration: none; padding: 8px 12px; border-radius: 8px; display: flex; justify-content: space-between; transition: background 150ms, color 150ms; }
+  .ws-nav > a:hover { color: var(--ink); background: rgba(239, 234, 227, 0.04); }
+  .ws-nav > a.on { color: var(--ink); background: var(--bg-3); box-shadow: inset 0 0 0 1px var(--line-2); }
+  .ws-count { color: var(--faint); font-family: var(--mono); font-size: 12.5px; }
   .ws-nav-bal { margin-top: 22px; padding: 16px 10px 0; border-top: 1px solid var(--line); }
-  .ws-k { display: block; font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); }
+  .ws-k { display: block; font-family: var(--mono); font-size: 12px; letter-spacing: 0; text-transform: lowercase; color: var(--faint); }
   .ws-main { min-width: 0; }
   .ws-sec { padding: 0 0 clamp(40px, 6vw, 64px); scroll-margin-top: 84px; }
   .ws-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 18px; }
   .ws-title { font-size: clamp(28px, 3.4vw, 40px); }
   .ws-h2 { font-size: clamp(21px, 2.4vw, 27px); }
 
-  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--line-2); border: 1px solid var(--line-2); border-radius: 6px; overflow: hidden; }
-  .kpi { background: var(--bg); padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-  .kpi-v { font-family: var(--mono); font-size: clamp(22px, 2.6vw, 30px); letter-spacing: -0.03em; color: var(--ink); line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .kpi-sub { font-family: var(--mono); font-size: 11.5px; color: var(--faint); line-height: 1.5; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .kpi { background: var(--bg-2); padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .kpi-v { font-family: var(--sans); font-weight: 500; font-size: clamp(24px, 2.6vw, 32px); letter-spacing: -0.035em; color: var(--ink); line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kpi-sub { font-family: var(--sans); font-size: 13px; color: var(--faint); line-height: 1.5; }
 
-  .seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 5px; overflow: hidden; }
-  .seg-btn { font-family: var(--mono); font-size: 12px; background: transparent; color: var(--muted); border: 0; padding: 7px 12px; cursor: pointer; }
-  .seg-btn + .seg-btn { border-left: 1px solid var(--line-2); }
+  .seg { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--line-2); border-radius: 999px; }
+  .seg-btn { font-family: var(--sans); font-size: 13px; background: transparent; color: var(--muted); border: 0; border-radius: 999px; padding: 5px 12px; cursor: pointer; }
+  
   .seg-btn:hover { color: var(--ink); }
-  .seg-btn.on { background: var(--accent-bg); color: var(--accent); }
+  .seg-btn.on { background: var(--bg-3); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-2); }
   .seg-btn span { color: var(--faint); }
 
-  .chart-card { position: relative; border: 1px solid var(--line-2); border-radius: 6px; padding: 18px 18px 12px; background: rgba(236, 231, 225, 0.015); }
+  .chart-card { position: relative; border: 1px solid var(--line); border-radius: 10px; padding: 18px 18px 12px; background: var(--bg-2); }
   .chart-top { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; margin-bottom: 14px; }
-  .chart-total { display: block; margin-top: 6px; font-size: 24px; color: var(--ink); letter-spacing: -0.02em; }
+  .chart-total { display: block; margin-top: 6px; font-family: var(--sans); font-weight: 500; font-size: 26px; color: var(--ink); letter-spacing: -0.02em; }
   .chart { height: 180px; display: flex; align-items: flex-end; gap: 3px; border-bottom: 1px solid var(--line-2); }
   .chart .bar { flex: 1; min-width: 2px; background: oklch(0.74 0.16 52 / 0.55); border-radius: 2px 2px 0 0; transition: height 0.35s ease, background 0.15s; }
   .chart .bar.zero { background: var(--line); height: 2px !important; }
   .chart .col { flex: 1; height: 100%; display: flex; align-items: flex-end; cursor: default; }
   .chart .col:hover .bar { background: var(--accent); }
   .chart-x { display: flex; justify-content: space-between; font-size: 11px; color: var(--dim); margin-top: 8px; }
-  .chart-tip { position: absolute; pointer-events: none; transform: translate(-50%, -100%); background: var(--bg-deep); border: 1px solid var(--line-3); border-radius: 4px; padding: 6px 10px; font-size: 12px; color: var(--ink); white-space: nowrap; }
-  .chart-empty { position: absolute; left: 18px; right: 18px; top: 50%; text-align: center; margin: 0; font-family: var(--mono); font-size: 12.5px; color: var(--faint); }
+  .chart-tip { position: absolute; pointer-events: none; transform: translate(-50%, -100%); background: var(--bg-deep); border: 1px solid var(--line-3); border-radius: 6px; padding: 6px 10px; font-size: 12px; color: var(--ink); white-space: nowrap; }
+  .chart-empty { position: absolute; left: 18px; right: 18px; top: 50%; text-align: center; margin: 0; font-family: var(--sans); font-size: 14px; color: var(--faint); }
 
   .tbl-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
-  .tbl-bar input[type=search] { flex: 1; min-width: 220px; font-family: var(--mono); font-size: 13px; color: var(--ink); background: transparent; border: 1px solid var(--line-2); border-radius: 5px; padding: 8px 12px; outline: none; }
+  .tbl-bar input[type=search] { flex: 1; min-width: 220px; font-family: var(--sans); font-size: 14px; color: var(--ink); background: var(--bg-deep); border: 1px solid var(--line-2); border-radius: 999px; padding: 8px 16px; outline: none; }
   .tbl-bar input[type=search]:focus { border-color: var(--line-3); }
-  .tbl-wrap { border: 1px solid var(--line-2); border-radius: 6px; overflow-x: auto; }
+  .tbl-wrap { border: 1px solid var(--line); border-radius: 10px; background: var(--bg-2); overflow-x: auto; }
   .tbl { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12.5px; }
-  .tbl th { text-align: left; font-weight: 400; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); padding: 11px 10px; border-bottom: 1px solid var(--line-2); white-space: nowrap; }
+  .tbl th { text-align: left; font-weight: 400; font-size: 12px; letter-spacing: 0; text-transform: lowercase; color: var(--faint); padding: 11px 10px; border-bottom: 1px solid var(--line-2); white-space: nowrap; }
   .tbl td { padding: 12px 10px; border-bottom: 1px solid var(--line); color: var(--ink-soft); vertical-align: middle; white-space: nowrap; }
   .tbl tr:last-child td { border-bottom: 0; }
   .tbl .num { text-align: right; }
-  .tbl .line { white-space: normal; min-width: 200px; width: 100%; padding-left: 14px; }
+  .tbl .line { white-space: normal; min-width: 200px; width: 100%; padding-left: 14px; font-family: var(--sans); font-size: 14px; }
   .tbl td:last-child, .tbl th:last-child { padding-right: 14px; }
-  .tbl .line b { color: var(--ink); font-weight: 400; }
+  .tbl .line b { color: var(--ink); font-weight: 500; }
   .tbl .line .cta { color: var(--accent); }
   .tbl .sub { display: block; color: var(--faint); font-size: 11px; margin-top: 3px; }
-  .pill { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; display: inline-flex; align-items: center; gap: 6px; }
+  .pill { font-size: 12px; letter-spacing: 0; text-transform: lowercase; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 999px; }
   .pill i { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); }
-  .pill.live { color: var(--accent); } .pill.live i { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+  .pill.live { color: var(--accent); border-color: oklch(0.74 0.16 52 / 0.35); } .pill.live i { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
   .pill.paused { color: var(--faint); }
   .prog { display: block; height: 4px; max-width: 220px; margin-top: 8px; border-radius: 2px; background: var(--line-2); overflow: hidden; }
   .prog i { display: block; height: 100%; background: var(--accent); }
-  .tbl-empty { margin: 0; padding: 26px 18px; font-family: var(--mono); font-size: 12.5px; color: var(--faint); text-align: center; }
+  .tbl-empty { margin: 0; padding: 26px 18px; font-family: var(--sans); font-size: 14px; color: var(--faint); text-align: center; }
 
-  .estimate { margin-top: 22px; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
-  .estimate > div { background: var(--bg); padding: 12px 14px; }
-  .estimate .v { display: block; font-family: var(--mono); font-size: 17px; color: var(--ink); margin-top: 6px; }
+  .estimate { margin-top: 22px; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .estimate > div { background: var(--bg-2); padding: 12px 14px; }
+  .estimate .v { display: block; font-family: var(--sans); font-weight: 500; font-size: 18px; color: var(--ink); margin-top: 6px; }
 
   @media (max-width: 860px) {
     .ws { grid-template-columns: minmax(0, 1fr); }
@@ -115,8 +115,8 @@
   </div>
 
   <div id="v-loading" class="hidden" style="display: grid; gap: 18px; max-width: 640px">
-    <div style="height: 64px; border-radius: 4px; background: rgba(236,231,225,0.045)"></div>
-    <div style="height: 40px; border-radius: 4px; background: rgba(236,231,225,0.045)"></div>
+    <div style="height: 64px; border-radius: 10px; background: rgba(239,234,227,0.045)"></div>
+    <div style="height: 40px; border-radius: 10px; background: rgba(239,234,227,0.045)"></div>
   </div>
 
   <div id="v-neterr" class="note note-warn hidden" style="max-width: 520px; padding: 22px 24px">
@@ -157,7 +157,7 @@
           <p class="body" style="margin: 12px 0 0; color: var(--ink-soft); font-size: 12.5px">We work out whose money it is by looking at who sent it. That is why there is no memo to remember — and also why money sent from an exchange arrives but cannot be credited to you.</p>
         </div>
 
-        <div style="margin-top: 18px; border: 1px solid rgba(236,231,225,0.11); border-radius: 5px; padding: 16px 18px; display: flex; align-items: center; gap: 12px">
+        <div style="margin-top: 18px; border: 1px solid var(--line); background: var(--bg-2); border-radius: 10px; padding: 16px 18px; display: flex; align-items: center; gap: 12px">
           <span class="pulse" style="width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none"></span>
           <p class="body" style="margin: 0; font-size: 13px">Watching the chain. A deposit usually shows up here within 20 seconds.</p>
         </div>
@@ -710,7 +710,7 @@ async function loadPools() {
       const active = c.status === 'active';
       return `
         <div style="display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: center; margin-top: 10px">
-          <div class="term-status" style="border: 1px solid var(--line); border-radius: 4px; padding: 9px 12px; min-height: 0">
+          <div class="term-status" style="border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; min-height: 0">
             <span class="ad" style="opacity:${active ? 1 : 0.45}">
               <span style="color: var(--accent)">✶</span>
               <span class="ad-text"><span class="brand-name">${esc(c.brand)}</span><span class="sep"> — ${esc(c.text)} · </span><span class="cta">${esc(c.cta)}</span></span>
@@ -729,7 +729,7 @@ async function loadPools() {
             ${budgetBar(p)}
           </div>
           <div style="display: flex; gap: 10px; align-items: center">
-            <span class="mono" style="font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: ${open ? 'var(--accent)' : 'var(--faint)'}">${p.status}</span>
+            <span class="mono" style="font-size: 12px; color: ${open ? 'var(--accent)' : 'var(--faint)'}">${p.status}</span>
             ${open ? `<button class="btn btn-sm btn-quiet" data-close-pool="${p.id}">Close pool</button>` : ''}
           </div>
         </div>

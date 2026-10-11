@@ -46,9 +46,9 @@
 
   <!-- ═══ yukleniyor ═══ -->
   <div id="v-loading" class="hidden" style="display: grid; gap: 18px; max-width: 640px">
-    <div style="height: 64px; border-radius: 4px; background: rgba(236,231,225,0.045)"></div>
-    <div style="height: 40px; border-radius: 4px; background: rgba(236,231,225,0.045)"></div>
-    <div style="height: 40px; border-radius: 4px; background: rgba(236,231,225,0.045)"></div>
+    <div style="height: 64px; border-radius: 10px; background: rgba(239,234,227,0.045)"></div>
+    <div style="height: 40px; border-radius: 10px; background: rgba(239,234,227,0.045)"></div>
+    <div style="height: 40px; border-radius: 10px; background: rgba(239,234,227,0.045)"></div>
     <p class="small" style="margin: 0">Loading your balance…</p>
   </div>
 
@@ -73,10 +73,10 @@
     <p class="small" style="margin: 0 0 clamp(26px, 4vw, 40px)">Paid in USDC on Solana devnet. Your USDC account is created automatically on the first payout.</p>
 
     <!-- bos -->
-    <div id="v-empty" class="hidden" style="border: 1px solid rgba(236,231,225,0.11); border-radius: 5px; padding: clamp(26px, 5vw, 46px)">
+    <div id="v-empty" class="hidden" style="border: 1px solid var(--line); background: var(--bg-2); border-radius: 10px; padding: clamp(26px, 5vw, 46px)">
       <h2 style="font-size: clamp(22px, 2.6vw, 28px); margin-bottom: 12px">No impressions yet</h2>
       <p class="body" style="margin: 0 0 24px; max-width: 60ch">Install the CLI and start a Claude Code session. The first line can take a few minutes to show up here.</p>
-      <button class="btn" id="copy-install"><span style="color: var(--faint)">$</span>npm i -g lingersh &amp;&amp; linger init --spinner<span class="tag">copy</span></button>
+      <button class="btn btn-cmd" id="copy-install"><span style="color: var(--faint)">$</span>npm i -g lingersh &amp;&amp; linger init --spinner<span class="tag">copy</span></button>
     </div>
 
     <!-- veri -->
@@ -146,7 +146,7 @@
       <div style="display: flex; flex-wrap: wrap; align-items: end; gap: 14px">
         <label class="field" style="max-width: 220px">Nickname<input type="text" id="p-nick" maxlength="20" autocomplete="nickname" spellcheck="false" placeholder="3–20 letters, digits, _ . -"></label>
         <label class="field" style="max-width: 240px">Country<select id="p-country"><option value="">Don't show</option></select></label>
-        <label class="mono" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-soft); padding-bottom: 10px; cursor: pointer">
+        <label style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink-soft); padding-bottom: 12px; cursor: pointer">
           <input type="checkbox" id="p-listed" style="accent-color: var(--accent)"> Show me on the leaderboard
         </label>
         <button class="btn btn-primary" id="p-save"><span class="spinner hidden" id="p-spin"></span><span>Save</span></button>
@@ -460,7 +460,7 @@ async function loadPool() {
     const c = d.project;
     $('#pool-project').innerHTML = `
       <p class="small" style="margin: 0 0 8px">Your project, as other teams see it${c.status === 'active' ? '' : ' (paused by the sponsor)'}:</p>
-      <div class="term-status" style="border: 1px solid var(--line); border-radius: 4px; padding: 11px 14px; min-height: 0">
+      <div class="term-status" style="border: 1px solid var(--line); border-radius: 8px; padding: 11px 14px; min-height: 0">
         <span class="ad"><span style="color: var(--accent)">✶</span>
           <span class="ad-text"><span class="brand-name">${poolEsc(c.brand)}</span><span class="sep"> — ${poolEsc(c.text)} · </span><span class="cta">${poolEsc(c.cta)}</span></span>
         </span>
