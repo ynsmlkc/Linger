@@ -35,11 +35,15 @@ export function prodProblems(env: Env): string[] {
     if (!env[k]) out.push(`${k} tanimli degil`)
   }
 
-  // Acikca verilmisse bile alt sinir var: uretimde birkac saniyelik pencere,
+  // Acikca verilmisse bile mainnet'te alt sinir var: birkac saniyelik pencere,
   // anomali kontrolunun para cikmadan once calismasini anlamsiz kilar.
+  // Devnet'te para gercek degil; demo icin pencere kisaltilabilir (0 dahil).
   const pending = env['LINGER_PENDING_MS']
-  if (pending !== undefined && !(Number(pending) >= 3600_000)) {
-    out.push(`LINGER_PENDING_MS uretimde en az 1 saat olmali (verilen: ${pending})`)
+  const mainnet = env['LINGER_NETWORK'] === 'mainnet'
+  if (pending !== undefined && !(Number(pending) >= (mainnet ? 3600_000 : 0))) {
+    out.push(mainnet
+      ? `LINGER_PENDING_MS mainnet'te en az 1 saat olmali (verilen: ${pending})`
+      : `LINGER_PENDING_MS gecerli bir sure degil (verilen: ${pending})`)
   }
 
   const min = env['LINGER_MIN_CLIENT_VERSION']
