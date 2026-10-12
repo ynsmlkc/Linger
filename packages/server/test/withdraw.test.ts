@@ -59,7 +59,7 @@ let dir: string, db: Db
 const clock = fixedClock(1_700_000_000_000)
 let n = 0
 
-function kur(spendable: bigint, bakiye = spendable) {
+function kur(spendable: bigint, bakiye = spendable, ek: Partial<ConstructorParameters<typeof WithdrawService>[0]> = {}) {
   const ids = () => `id-${++n}`
   const ledger = new Ledger(new SqliteLedgerStore(db, clock, ids), clock, ids)
   if (bakiye > 0n) ledger.deposit({ advertiserId: ADV, amount: micros(bakiye), topupId: `t-${++n}` })
@@ -71,6 +71,7 @@ function kur(spendable: bigint, bakiye = spendable) {
     spendable: () => micros(spendable),
     newBatchId: () => `w-${++n}`,
     log: (m) => loglar.push(m),
+    ...ek,
   })
   return { svc, ledger, rail, loglar }
 }
@@ -196,6 +197,28 @@ describe('para cekme', () => {
     expect(r.ok).toBe(false)
     expect(bakiye(t.ledger)).toBe(0n)                                  // hesaptan cikti
     expect(t.ledger.balance(accountId('payouts_in_flight'))).toBe(20_000_000n)  // ama yolda
+  })
+
+  it('onay gecikirse bekleme suresi icinde zincire tekrar sorar ve sonucu dondurur', async () => {
+    const beklemeler: number[] = []
+    const t = kur(20_000_000n, 20_000_000n, { confirmWaitMs: 10_000, sleep: async (ms) => { beklemeler.push(ms) } })
+    let sorgu = 0
+    t.rail.reconcile = async (r) => ({
+      state: ++sorgu < 3 ? 'pending' : 'settled', txHash: r.txHash, slot: 1, feeCharged: 100n, opResults: [],
+    })
+    const r = await t.svc.withdraw(ADV, micros(20_000_000n))
+    expect(r.ok).toBe(true)
+    expect(sorgu).toBe(3)
+    expect(t.ledger.balance(accountId('payouts_in_flight'))).toBe(0n)
+  })
+
+  it('bekleme suresi dolarsa yine belirsiz doner, sonsuza kadar beklemez', async () => {
+    let n = 0
+    const t = kur(20_000_000n, 20_000_000n, { confirmWaitMs: 6_000, sleep: async () => { n++ } })
+    t.rail.sonuc = 'pending'
+    const r = await t.svc.withdraw(ADV, micros(20_000_000n))
+    expect(r.ok).toBe(false)
+    expect(n).toBe(3)
   })
 
   it('zarf kurulamazsa hicbir kayit yazilmaz', async () => {

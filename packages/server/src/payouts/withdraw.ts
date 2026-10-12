@@ -57,7 +57,18 @@ export interface WithdrawDeps {
   readonly log: (m: string) => void
   /** Sicak cuzdan kuyrugu — bkz. `createSerial`. Verilmezse sirasiz calisir. */
   readonly serial?: Serial
+  /**
+   * Gonderimden sonra zincirin onayini en fazla bu kadar bekle. Solana'da
+   * `finalized` ~13 sn surer; tek bir sorgu neredeyse her zaman "henuz
+   * degil" der ve kullanici cevabi alamaz. Sure dolarsa sonuc yine
+   * `pending` — mutabakat dongusu sonra kapatir. Varsayilan 0: tek sorgu.
+   */
+  readonly confirmWaitMs?: number
+  /** Testler icin enjekte edilebilir bekleme. */
+  readonly sleep?: (ms: number) => Promise<void>
 }
+
+const CONFIRM_POLL_MS = 2_000
 
 /**
  * Sicak cuzdandan cikan islemleri SIRAYA sokar.
@@ -192,7 +203,12 @@ export class WithdrawService {
     }
 
     // ── 4. Zincire sor. Tek dogru cevap orada. ──
-    const settlement = await this.deps.rail.reconcile(receipt)
+    let settlement = await this.deps.rail.reconcile(receipt)
+    const sleep = this.deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+    for (let left = this.deps.confirmWaitMs ?? 0; settlement.state === 'pending' && left > 0; left -= CONFIRM_POLL_MS) {
+      await sleep(CONFIRM_POLL_MS)
+      try { settlement = await this.deps.rail.reconcile(receipt) } catch { /* RPC hatasi: tekrar dene */ }
+    }
 
     if (settlement.state === 'settled') {
       this.deps.ledger.payoutSettled({

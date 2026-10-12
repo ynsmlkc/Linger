@@ -293,6 +293,7 @@ const withdraw = HOT_SECRET
       newBatchId: () => `w-${ids.impressionId()}`,
       log,
       serial: hotWallet,
+      confirmWaitMs: 40_000,
     })
   : null
 
@@ -312,6 +313,7 @@ const publisherWithdraw = HOT_SECRET
       newBatchId: () => `w-${ids.impressionId()}`,
       log,
       serial: hotWallet,
+      confirmWaitMs: 40_000,
     })
   : null
 
@@ -330,6 +332,7 @@ const platformWithdraw = HOT_SECRET
       newBatchId: () => `w-${ids.impressionId()}`,
       log,
       serial: hotWallet,
+      confirmWaitMs: 40_000,
     })
   : null
 
