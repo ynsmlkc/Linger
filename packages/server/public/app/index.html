@@ -423,16 +423,43 @@ $('#w-send').onclick = async () => {
       + `<a href="${explorer.tx(r.txHash)}" target="_blank" rel="noopener" style="color: var(--accent)">View on the chain ↗</a>`;
     show($('#w-done'), true);
     $('#w-amount').value = '';
-    await load();
-    show(wBox, true);
   } catch (e) {
-    $('#w-error').textContent = e.message;
-    show($('#w-error'), true);
+    // Sunucu "henuz onaylanmadi" diyorsa para yolda — hata degil. Asagidaki
+    // yenileme onaylanana kadar bakiyeyi izliyor.
+    if (/onaylanmadi/.test(e.message)) {
+      $('#w-done').textContent = 'Sent — waiting for the chain to confirm. Your balance updates here on its own.';
+      show($('#w-done'), true);
+      $('#w-amount').value = '';
+    } else {
+      $('#w-error').textContent = e.message;
+      show($('#w-error'), true);
+    }
   } finally {
     show($('#w-spin'), false);
     $('#w-send').disabled = false;
+    // Basarili, basarisiz ya da "henuz onaylanmadi" — her durumda bakiye
+    // degismis olabilir (para "yolda"ya gecer). Sayfa yenilemeden goster.
+    await refreshBalance();
   }
 };
+
+/**
+ * Bakiyeyi ekrani "yukleniyor"a cevirmeden tazeler. Para yoldaysa
+ * (zincir onayi cekim isteginden uzun surdu) onaylanana kadar birkac saniyede
+ * bir tekrar bakar — kullanici sayfayi yenilemek zorunda kalmasin.
+ */
+let balancePoll = null;
+async function refreshBalance(tries = 24) {
+  clearTimeout(balancePoll);
+  let d;
+  try { d = await api('/v1/me/balance'); } catch { return; }
+  const open = !wBox.classList.contains('hidden');
+  render(d);
+  if (open && BigInt(d.withdrawableMicros || '0') > 0n) show(wBox, true);
+  if (BigInt(d.inFlightMicros) > 0n && tries > 0) {
+    balancePoll = setTimeout(() => refreshBalance(tries - 1), 5000);
+  }
+}
 
 load();
 
