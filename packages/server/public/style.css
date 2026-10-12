@@ -76,6 +76,8 @@ a:hover { color: var(--accent); }
 }
 .brand { display: flex; align-items: center; gap: 8px; font-family: var(--sans); font-weight: 600; font-size: 16px; letter-spacing: -0.02em; }
 .brand .star { color: var(--accent); font-size: 17px; }
+/* ✶ karakterinin kollari dikey; logo (ASCII yildiz) yatay kollu — 90° cevir. */
+.brand .star { display: inline-block; transform: rotate(90deg); }
 .nav { display: flex; align-items: center; gap: clamp(14px, 2.2vw, 28px); font-family: var(--sans); font-size: 14px; color: var(--ink-2); }
 .nav a { color: var(--ink-2); transition: color 150ms; }
 .nav a:hover { color: var(--ink); }
