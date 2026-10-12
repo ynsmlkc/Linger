@@ -89,8 +89,13 @@ export type WithdrawResult =
   | { readonly ok: true; readonly txHash: string; readonly amount: Micros }
   | { readonly ok: false; readonly reason: string; readonly retryable: boolean }
 
-/** Zincir ucreti cekilecek tutarin altinda kalmali; toz cekimini engelle. */
-export const MIN_WITHDRAW: Micros = 100_000n as Micros         // $0.10
+/**
+ * Taban yok: yayinci bakiyesinin TAMAMINI istedigi an cekebilir. Yalnizca
+ * sifir/negatif tutar reddediliyor. Bedeli bilerek kabul edildi: toz cekimde
+ * islem ucreti (ve ilk cekimde alici ATA kirasi) tutardan buyuk olabilir,
+ * onu platform oduyor.
+ */
+export const MIN_WITHDRAW: Micros = 1n as Micros
 
 export class WithdrawService {
   #busy = new Set<string>()

@@ -4,7 +4,18 @@
 
 While Claude Code is thinking, a single clearly-disclosed sponsored line appears. Verified impressions accrue to the developer's balance and settle in USDC on Solana. No bank account, no country restrictions.
 
-**Status: pre-alpha, devnet only.** The backend, ledger, wallet login and payout code are implemented and unit-tested. Nothing is deployed, and the Solana payment rail has **not yet been run against devnet** (see [Verification status](#verification-status)). No real money has moved.
+**Status: live on Solana devnet.** No real money has moved — every amount is devnet USDC.
+
+- **Site & API:** https://lingerserver-production.up.railway.app
+- **CLI:** [`lingersh`](https://www.npmjs.com/package/lingersh) on npm
+
+```bash
+npm i -g lingersh && linger init --spinner   # install the status line + daemon
+linger login                                 # connect a wallet (Phantom / Solflare / Backpack)
+linger balance                               # what you've earned
+```
+
+Advertisers sign in at [`/advertisers/app`](https://lingerserver-production.up.railway.app/advertisers/app), deposit devnet USDC and launch a campaign. Developers see what they earned at [`/app`](https://lingerserver-production.up.railway.app/app) and can withdraw any amount, at any time. See [Verification status](#verification-status) for exactly what has and hasn't been exercised.
 
 The plan of record is [`ROADMAP.md`](ROADMAP.md).
 
@@ -14,9 +25,9 @@ The plan of record is [`ROADMAP.md`](ROADMAP.md).
 
 Per-impression amounts are tiny — a fraction of a cent. On traditional rails the fixed cost of a payout (transfer fee, FX spread, compliance overhead) routinely exceeds the payout itself, which forces platforms into high thresholds, monthly batches, and a short list of supported countries. Developers in Turkey, Latin America, South Asia and Africa generate value they cannot collect.
 
-A Solana transfer costs 5,000 lamports (0.000005 SOL) per signature plus an optional priority fee, and USDC is a first-class SPL token that every major wallet already shows. A $1 payout threshold is economically sane.
+A Solana transfer costs 5,000 lamports (0.000005 SOL) per signature plus an optional priority fee, and USDC is a first-class SPL token that every major wallet already shows. That makes it possible to drop the payout threshold entirely: a developer can withdraw any amount the moment it is verified.
 
-One cost to be aware of: a recipient's USDC token account (ATA) must exist before they can receive USDC, and the *sender* opens it — about 0.002 SOL of rent per new recipient. That is paid once per publisher and is tracked as an open question in the roadmap.
+One cost to be aware of: a recipient's USDC token account (ATA) must exist before they can receive USDC, and the *sender* opens it — about 0.002 SOL of rent per new recipient. The platform pays it once per publisher; with no threshold, a first withdrawal of a few cents costs the platform more than it sends. That is a deliberate choice for now and is tracked as an open question in the roadmap.
 
 ## What has been measured
 
@@ -30,7 +41,7 @@ One cost to be aware of: a recipient's USDC token account (ATA) must exist befor
 
 An early version of the measurement defined the wait window as tool execution time. That was wrong — tools finish in under a second and the inventory looked like zero. The wait a user actually experiences is the model thinking, which lives in the gaps *between* hooks. The correction is documented in ADR-001.
 
-**Payment rail** — *not yet measured on Solana.* The failure modes that shaped the design (one bad destination drops a whole batch, a failed transaction still lands and still costs a fee, retries must re-send identical bytes) are encoded in the code and covered by unit tests against a mock rail. The devnet integration test that proves them on a real cluster is written but has not been run; see [`spikes/README.md`](spikes/README.md).
+**Payment rail** — the failure modes that shaped the design (one bad destination drops a whole batch, a failed transaction still lands and still costs a fee, retries must re-send identical bytes) are encoded in the code, covered by unit tests against a mock rail, and proven on devnet by `test:devnet` (6/6, see below).
 
 ## Architecture
 
@@ -106,14 +117,15 @@ See [`.env.example`](.env.example) for every variable.
 
 | Area | Status |
 |---|---|
-| Unit tests (protocol, payments, server, CLI) | ✅ pass |
-| Bundled server boots; wallet login round-trip with a real ed25519 signature | ✅ checked locally |
-| Anchor vault program: build + 15 litesvm tests | ✅ pass |
+| Unit tests (protocol, payments, server, CLI) | ✅ pass — 700+ tests |
 | `SolanaRail` against a real Solana cluster (`test:devnet`) | ✅ 6/6 pass on devnet (2026-09-23): ATA creation, multi-payout, idempotent resend, frozen destination, expired blockhash |
-| Deposit watcher (`SolanaDepositSource`) against a real deposit | ⏳ **not tested** — unit-tested against a fake source only |
-| Browser login page with a real Phantom / Solflare / Backpack | ⏳ **not tested** |
+| Anchor vault program: build + 15 litesvm tests | ✅ pass |
+| Deployed backend (Railway, devnet, persistent SQLite volume) | ✅ live |
+| CLI published to npm, clean global install | ✅ `lingersh` |
+| Wallet login with a real Phantom wallet (CLI + web) | ✅ checked on the live server |
+| Advertiser deposit credited by the deposit watcher → campaign served → impressions verified after the hold | ✅ checked on the live server |
+| Developer withdrawal on the live server | ⏳ code path unit-tested and on-chain rail proven; not yet exercised end-to-end on the deployment |
 | Vault program wired into the server | ❌ not started (server uses a hot-wallet treasury) |
-| Deployed backend | ❌ none |
 
 ## Status
 
@@ -123,7 +135,8 @@ See [`.env.example`](.env.example) for every variable.
 - [x] Backend — ad serving, impression ingest, ledger, campaigns, withdrawals
 - [x] Wallet sign-in — message signature (Phantom / Solflare / Backpack)
 - [x] Payments code — `SolanaRail`, address policy, payout job, deposit watcher
-- [ ] Payments proven on devnet
+- [x] Payments proven on devnet
+- [x] Deployed (devnet) and CLI on npm
 - [ ] Vault program integrated
 
 Mainnet, click attribution, and adapters beyond Claude Code are explicitly out of scope for now. See [`ROADMAP.md`](ROADMAP.md).

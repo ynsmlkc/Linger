@@ -82,21 +82,19 @@ describe('linger balance', () => {
     expect(ekran()).toContain('awaiting verification')
   })
 
-  it('esigin altindayken NE KADAR kaldigi soylenir', async () => {
+  it('bakiye sifirken cekilecek bir sey olmadigi soylenir', async () => {
     girisYap()
     await cmdBalance([], cevap({
-      payableMicros: '400000', payoutThresholdMicros: '1000000',
-      blockedReason: 'threshold 10000000 micro, balance 4000000',
+      payableMicros: '0', payoutThresholdMicros: '1',
+      blockedReason: 'threshold 1 micro, balance 0',
     }))
-    const s = ekran()
-    expect(s).toContain('$0.6')          // 1.00 − 0.40
-    expect(s).toContain('$1')            // esik
+    expect(ekran()).toMatch(/nothing to withdraw yet/)
   })
 
-  it('esik asildiysa odemenin gelecegi soylenir', async () => {
+  it('bakiye varsa istedigi an cekebilecegi soylenir', async () => {
     girisYap()
     await cmdBalance([], cevap({ payableMicros: '2500000' }))
-    expect(ekran()).toMatch(/threshold cleared/)
+    expect(ekran()).toMatch(/ready to withdraw/)
   })
 
   /**

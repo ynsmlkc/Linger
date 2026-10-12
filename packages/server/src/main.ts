@@ -231,7 +231,9 @@ if (DEV_TOKEN) {
 
 /* ─────────────────────── odeme ─────────────────────── */
 
-const PAYOUT_THRESHOLD = micros(1_000_000n)           // $1
+// Esik yok — bkz. MIN_WITHDRAW. Bakiye ucu bunu `payoutThresholdMicros` olarak
+// raporluyor; 1 micro = "bakiyesi olan herkes cekebilir".
+const PAYOUT_THRESHOLD = micros(1n)
 const payouts = new SqlitePayoutStore(db)
 const wallets = new WalletStore({
   clock,

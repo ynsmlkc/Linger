@@ -123,7 +123,7 @@ describe('para cekme', () => {
     expect(bakiye(t.ledger)).toBe(15_000_000n)
   })
 
-  it('esigin altindaki toz cekilemez', async () => {
+  it('sifir tutar cekilemez (MIN_WITHDRAW - 1)', async () => {
     const t = kur(20_000_000n)
     const r = await t.svc.withdraw(ADV, micros(MIN_WITHDRAW - 1n))
     expect(r.ok).toBe(false)
@@ -287,10 +287,15 @@ describe('yayinci cekimi — kind: publisher', () => {
     expect((await t.svc.withdraw(PUB, micros(20_000_000n))).ok).toBe(true)
   })
 
-  it('esigin altindaki toz cekilemez — reklamverenle ayni kural', async () => {
-    const t = kurYayinci(MIN_WITHDRAW - 1n)
-    const r = await t.svc.withdraw(PUB, micros(MIN_WITHDRAW - 1n))
-    expect(r.ok).toBe(false)
+  it('taban yok: kucuk bir bakiyenin tamami cekilebilir', async () => {
+    const t = kurYayinci(3_850n)
+    expect(t.svc.available(PUB)).toBe(3_850n)
+    expect((await t.svc.withdraw(PUB, micros(3_850n))).ok).toBe(true)
+  })
+
+  it('sifir tutar cekilemez', async () => {
+    const t = kurYayinci(3_850n)
+    expect((await t.svc.withdraw(PUB, micros(0n))).ok).toBe(false)
   })
 
   it('bakiyenin ustunde cekim istenirse reddedilir, "raporlanmamis" gibi yanlis bir sebep verilmez', async () => {
