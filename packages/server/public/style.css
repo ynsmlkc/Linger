@@ -8,7 +8,7 @@
 
 /* Ana sayfanin (landing.css) dili butun sayfalarda: sicak koyu zemin,
    Geist grotesk, tek turuncu vurgu, yuvarlak hap dugmeler. Eski serif +
-   izgara gorunumu Dwell'den kalmaydi. */
+   izgara gorunumu ilk taslaktan kalmaydi. */
 :root {
   --bg:        #12110f;
   --bg-2:      #181714;
