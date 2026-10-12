@@ -374,7 +374,7 @@ function render(d) {
   show($('#no-payouts'), ps.length === 0);
   show($('#payouts-wrap'), ps.length > 0);
   if (ps.length === 0) {
-    $('#no-payouts').textContent = 'Nothing sent yet. Withdraw whenever you have a balance above the network\'s dust floor.';
+    $('#no-payouts').textContent = 'Nothing sent yet. Withdraw any amount, whenever you like.';
   } else {
     $('#payouts').innerHTML = ps.map((p) => `
       <tr>
@@ -419,7 +419,7 @@ $('#w-send').onclick = async () => {
       method: 'POST', body: { amountMicros: amount.toString() },
     });
     $('#w-done').innerHTML =
-      `Sent ${usd(r.amountMicros)}. `
+      `Confirmed — ${usd(r.amountMicros)} is in your wallet. `
       + `<a href="${explorer.tx(r.txHash)}" target="_blank" rel="noopener" style="color: var(--accent)">View on the chain ↗</a>`;
     show($('#w-done'), true);
     $('#w-amount').value = '';
@@ -427,6 +427,7 @@ $('#w-send').onclick = async () => {
     // Sunucu "henuz onaylanmadi" diyorsa para yolda — hata degil. Asagidaki
     // yenileme onaylanana kadar bakiyeyi izliyor.
     if (/onaylanmadi/.test(e.message)) {
+      awaitingConfirm = true;
       $('#w-done').textContent = 'Sent — waiting for the chain to confirm. Your balance updates here on its own.';
       show($('#w-done'), true);
       $('#w-amount').value = '';
@@ -449,15 +450,32 @@ $('#w-send').onclick = async () => {
  * bir tekrar bakar — kullanici sayfayi yenilemek zorunda kalmasin.
  */
 let balancePoll = null;
+let awaitingConfirm = false;
 async function refreshBalance(tries = 24) {
   clearTimeout(balancePoll);
   let d;
   try { d = await api('/v1/me/balance'); } catch { return; }
   const open = !wBox.classList.contains('hidden');
   render(d);
-  if (open && BigInt(d.withdrawableMicros || '0') > 0n) show(wBox, true);
-  if (BigInt(d.inFlightMicros) > 0n && tries > 0) {
-    balancePoll = setTimeout(() => refreshBalance(tries - 1), 5000);
+  if (open) show(wBox, true);
+  if (BigInt(d.inFlightMicros) > 0n) {
+    if (tries > 0) balancePoll = setTimeout(() => refreshBalance(tries - 1), 5000);
+    return;
+  }
+  // Yolda para kalmadi: bekleyen cekim sonuclandi. "Bekleniyor" yazisini
+  // zincirdeki sonucla degistir.
+  if (awaitingConfirm) {
+    awaitingConfirm = false;
+    const p = (d.recentPayouts || [])[0];
+    if (p && p.state === 'settled') {
+      $('#w-done').innerHTML =
+        `Confirmed — ${usd(p.amountMicros)} is in your wallet. `
+        + `<a href="${explorer.tx(p.txHash)}" target="_blank" rel="noopener" style="color: var(--accent)">View on the chain ↗</a>`;
+    } else {
+      show($('#w-done'), false);
+      $('#w-error').textContent = 'The withdrawal did not go through. The amount is back in your balance.';
+      show($('#w-error'), true);
+    }
   }
 }
 
