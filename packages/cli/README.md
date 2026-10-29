@@ -57,7 +57,8 @@ Your identity *is* your wallet address. No GitHub, no email, no password.
 | `linger balance` | show earnings |
 | `linger whoami` | show the connected wallet |
 | `linger status` | daemon status |
-| `linger doctor` | diagnose the install |
+| `linger doctor` | diagnose the install — runs the installed commands in every shell Claude Code may use |
+| `linger doctor --fix` | rewrite Linger's settings.json entries (installs from older versions) |
 | `linger restart` | restart the daemon |
 | `linger pause` / `resume` | stop showing ads for now |
 | `linger logout` | disconnect the wallet |
@@ -87,6 +88,17 @@ code. The value used to tell projects apart is hashed with a salt generated on
 your machine that never leaves it — raw paths never reach the network.
 
 ## Things you should know
+
+**Ads show only in Claude Code running in a terminal**, including an IDE's
+integrated terminal. Earnings are counted from the status line alone, and
+Claude Code's documentation does not say that the VS Code / JetBrains extension
+panels or the desktop app render a custom status line — so there, nothing is
+shown and nothing is counted.
+
+**Windows:** Claude Code runs Linger's commands through Git Bash, or through
+PowerShell if Git for Windows is not installed. Linger writes commands that work
+in both. If you installed version 0.1.16 or older and see no ads, run
+`linger doctor --fix`.
 
 Claude Code hides some of the keyboard hints at the bottom (like
 `esc to interrupt`) while a custom `statusLine` is defined. That is Claude
