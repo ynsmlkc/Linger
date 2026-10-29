@@ -13,14 +13,13 @@
  *
  * Bos cikti = satir yok. Reklam yalnizca aktif tur icinde gelir (ADR-023).
  */
-import { socketPathFor } from '../ipc.js'
+import { socketPathFor, lingerHome } from '../ipc.js'
 
 import { connect } from 'node:net'
 import { writeSync } from 'node:fs'
 import { termShape } from './term-shape.js'
 
-const SOCKET = process.env['LINGER_SOCKET']
-  ?? socketPathFor(process.env['LINGER_HOME'] ?? `${process.env['HOME']}/.linger`)
+const SOCKET = process.env['LINGER_SOCKET'] ?? socketPathFor(lingerHome())
 const BUDGET_MS = Number(process.env['LINGER_BUDGET_MS'] ?? 50) || 50
 
 /** Ne olursa olsun sessizce cik. */

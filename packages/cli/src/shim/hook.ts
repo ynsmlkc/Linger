@@ -11,7 +11,7 @@
  * cagrisini bloklayabilir — ve bu aninda uninstall sebebidir. Daemon yoksa,
  * socket bozuksa, JSON bozuksa: sessizce cik.
  */
-import { socketPathFor } from '../ipc.js'
+import { socketPathFor, lingerHome } from '../ipc.js'
 
 import { connect } from 'node:net'
 import { spawn } from 'node:child_process'
@@ -19,8 +19,7 @@ import { existsSync, openSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const SOCKET = process.env['LINGER_SOCKET']
-  ?? socketPathFor(process.env['LINGER_HOME'] ?? `${process.env['HOME']}/.linger`)
+const SOCKET = process.env['LINGER_SOCKET'] ?? socketPathFor(lingerHome())
 const BUDGET_MS = Number(process.env['LINGER_HOOK_BUDGET_MS'] ?? 300) || 300
 
 const quit = (): never => process.exit(0)
@@ -47,11 +46,12 @@ function tryRevive(): void {
     const entry = join(pkgRoot, 'dist', 'daemon.mjs')
     if (!existsSync(entry)) return
 
-    const home = process.env['LINGER_HOME'] ?? `${process.env['HOME']}/.linger`
+    const home = lingerHome()
     mkdirSync(home, { recursive: true, mode: 0o700 })
     const logFd = openSync(join(home, 'daemon.log'), 'a')
     const child = spawn(process.execPath, [entry], {
       detached: true,
+      windowsHide: true,
       stdio: ['ignore', logFd, logFd],
     })
     child.unref()
